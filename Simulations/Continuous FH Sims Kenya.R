@@ -15,7 +15,7 @@ library(cmdstanr)
 source("/Users/alanamcgovern/Desktop/Research/my_helpers.R")
 
 # load geometry (country specific) ------
-setwd('/Users/alanamcgovern/Desktop/Research/UN_Estimates/UN-Subnational-Estimates/Data/shapeFiles_gadm')
+setwd('Kenya_Example')
 poly.adm2 <- st_read(dsn = 'gadm41_KEN_shp', layer = "gadm41_KEN_2", options = "ENCODING=UTF-8")
 poly.adm2$admin2 <- 1:nrow(poly.adm2)
 poly.adm2$admin2.char <- paste0('admin2_',1:nrow(poly.adm2))
@@ -38,7 +38,7 @@ colnames(admin2.mat) <- rownames(admin2.mat) <- poly.adm2$admin2.char
 
 # load population (country specific) -------
 
-pop_dens <- rast("/Users/alanamcgovern/Desktop/Research/UN_Estimates/UN-Subnational-Estimates/Data/Kenya/Population/ken_u5_2022_1km.tif")
+pop_dens <- rast("ken_u5_2022_1km.tif")
 
 poly.adm2$admin_pop <- round(exact_extract(pop_dens, poly.adm2, 'sum'))
 
@@ -271,18 +271,9 @@ fit_inla_with_samples <- function(outcome,
   return(eta_samples)
 }
 
-setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance")
-satt_mod <- cmdstan_model("IID_FH_VarSmooth_Satt.stan")
-
 # load covariates ---------
-setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance")
-
-# ur_weights_adm1 <- readRDS('Kenya_2022_admin1_u5_ur_weights.rds')
-# ur_weights_adm2 <- readRDS('Kenya_2022_admin2_u5_ur_weights.rds')
-
-setwd("/Users/alanamcgovern/Desktop/Research/KEN_Covariates")
-load(file='Kenya_admin2_covariates.rda')
-load(file='Kenya_admin1_covariates.rda')
+load(file='KEN_Covariates/Kenya_admin2_covariates.rda')
+load(file='KEN_Covariates/Kenya_admin1_covariates.rda')
 
 cmat_admin1 <- merge(cmat_admin1,sim_pop_long[order(admin1),mean(urban),by=admin1]) %>% rename(urb_frac = V1)
 cmat_admin2 <- merge(cmat_admin2,sim_pop_long[order(admin2),mean(urban),by=admin2]) %>% rename(urb_frac = V1)
@@ -293,7 +284,7 @@ cmat_admin2 <- merge(cmat_admin2,sim_pop_long[order(admin2),mean(urban),by=admin
 # set simulation parameters ---------
 admin_level <- c(1,2)[2]
 
-load(file=paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance/ken_2022_cont_outcomes.rda'))
+load(file=paste0('KEN_2022_cont_outcomes.rda'))
 dir.dat <- dat[!is.na(dat[,c('haz')]),]
 dir.dat$value <- dir.dat[,c('haz')]
 
@@ -489,7 +480,7 @@ for(area in sample(1:n_admin2,18)){
 
 # save direct estimates and other simulation info -------------
 
-setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance")
+setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations")
 # 
 params_list <- list(admin2.strata = admin2.strata.dir,
                     alpha = alpha,
@@ -596,10 +587,10 @@ for(k in 1:100){
 
 # SAVE/LOAD RESULTS ---------
 
-setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance")
+setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations")
 # 
-save(results.adm1,file = 'sim8_complex_admin1.fh.rda')
-save(results.adm2,file = 'sim8_complex_admin2.fh.rda')
+save(results.adm1,file = 'simX_complex_admin1.fh.rda')
+save(results.adm2,file = 'simX_complex_admin2.fh.rda')
 #### POST PROC -----
 
 res.adm1.mat <- do.call(rbind,results.adm1)
