@@ -42,8 +42,40 @@ admin.key <- merge(as.data.frame(poly.adm2[,c('NAME_1','NAME_2','admin2','admin2
 admin1.mat <- nb2mat(poly2nb(poly.adm1), zero.policy = TRUE)
 colnames(admin1.mat) <- rownames(admin1.mat) <- poly.adm1$admin1.char
 
+admin1.nbs <- poly2nb(poly.adm1)
+nodes1 <- NULL
+for(i in 1:n_admin1){
+  nodes1 <- rbind(nodes1,data.frame(node1=i,node2=as.numeric(admin1.nbs[[i]])))
+}
+nodes1 <- nodes1[nodes1$node1<nodes1$node2,]
+
+Q.admin1 <- -admin1.mat
+Q.admin1 <- sapply(1:nrow(Q.admin1),function(i){sum(I(Q.admin1[i,]!=0))})*Q.admin1
+diag(Q.admin1) <- sapply(1:nrow(Q.admin1),function(i){sum(I(Q.admin1[i,]!=0))})
+diag(Q.admin1)[diag(Q.admin1)==0] <- 1
+Q1_inv <- INLA:::inla.ginv(as.matrix(Q.admin1))
+Q1_scaled <- INLA::inla.scale.model(Q.admin1, constr=list(A=matrix(1,nrow=1,ncol=n_admin1), e=0))
+Q1_scaled_inv <- INLA:::inla.ginv(as.matrix(Q1_scaled))
+
+
 admin2.mat <- nb2mat(poly2nb(poly.adm2), zero.policy = TRUE)
 colnames(admin2.mat) <- rownames(admin2.mat) <- poly.adm2$admin2.char
+
+admin2.nbs <- poly2nb(poly.adm2)
+nodes2 <- NULL
+for(i in 1:n_admin2){
+  nodes2 <- rbind(nodes2,data.frame(node1=i,node2=as.numeric(admin2.nbs[[i]])))
+}
+nodes2 <- nodes2[nodes2$node1<nodes2$node2,]
+
+Q.admin2 <- -admin2.mat
+Q.admin2 <- sapply(1:nrow(Q.admin2),function(i){sum(I(Q.admin2[i,]!=0))})*Q.admin2
+diag(Q.admin2) <- sapply(1:nrow(Q.admin2),function(i){sum(I(Q.admin2[i,]!=0))})
+diag(Q.admin2)[diag(Q.admin2)==0] <- 1
+Q2_inv <- INLA:::inla.ginv(as.matrix(Q.admin2))
+Q2_scaled <- INLA::inla.scale.model(Q.admin2, constr=list(A=matrix(1,nrow=1,ncol=n_admin2), e=0))
+Q2_scaled_inv <- INLA:::inla.ginv(as.matrix(Q2_scaled))
+
 
 # load covariates ----------
 load(file='KEN_Covariates/Kenya_admin2_covariates.rda')
@@ -152,13 +184,16 @@ fit_inla_with_samples <- function(outcome,
   return(eta_samples)
 }
 
-# get FH estimates (oracle and no smoothing) from direct --------
+setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing")
+mod0 <- cmdstan_model("Stan/BYM2_FH_NaiveSmooth.stan")
+
+# get FH estimates (comparison models) from direct --------
 
 results.adm1 <- results.adm2 <- list() # record estimates 
 #covariates = mean_covariates
-covariates = c('temp','elev','tthc_log','nt_lights_log','urb_frac')
+covariates = c('urb_frac','temp','elev','tthc_log','nt_lights_log')
 random_model = c("iid","bym2")[2]
-for(k in 1:2){
+for(k in 1:100){
   cat(k,'\n')
   
   sim.admin2.dir <- direct.adm2[[k]]
@@ -168,11 +203,14 @@ for(k in 1:2){
                                               var.truth = ifelse(is.na(variance),NA,var.truth))
   sim.admin2.dir <- merge(sim.admin2.dir,cmat_admin2)
   sim.admin2.dir <- sim.admin2.dir[order(sim.admin2.dir$admin2),]
+  sim.admin2.dir <- as.data.frame(sim.admin2.dir)
+  data_areas <- sim.admin2.dir[!is.na(sim.admin2.dir$mean),]$admin2
   
   sim.admin1.dir <- direct.adm1[[k]]
   sim.admin1.dir$var.truth <- adm1.dir.variance
   sim.admin1.dir <- merge(sim.admin1.dir,cmat_admin1)
   sim.admin1.dir <- sim.admin1.dir[order(sim.admin1.dir$admin1),]
+  sim.admin1.dir <- as.data.frame(sim.admin1.dir)
   
   ## model is specified with correct variance ----
   eta.samples1a <- fit_inla_with_samples(outcome = 'mean',
@@ -191,7 +229,7 @@ for(k in 1:2){
                                         adj_matrix = admin2.mat,
                                         random_model = random_model)
   
-  # naive FH (estimated variance, assuming normality) ----
+  # FH no smoothing ----
   eta.samples2a <- fit_inla_with_samples(outcome = 'mean',
                                          scale_var = 'variance',
                                          data = sim.admin1.dir,
@@ -208,6 +246,104 @@ for(k in 1:2){
                                         adj_matrix = admin2.mat,
                                         random_model = random_model)
   
+  # FH with naive smoothing -----------
+  
+  Cons <- v_hat_scaled <- df<- rep(NA,n_admin1)
+  for(area in 1:n_admin1){
+    tmp <- sampled_clusters[[k]] %>% filter(admin1==area) %>% group_by(cluster,urban) %>% reframe(n=n())
+    N = c(sum(tmp$urban),sum(1-tmp$urban))
+    
+    # outputs
+    Cons[area] <- 1/(sum(tmp$n)) #multiplier for variance term in weighted mean distribution
+    
+    # recale to be in terms of chi square approximation
+    v_hat_scaled[area] <- sim.admin1.dir$variance[area]*sum(N)^2/mean(N/(N-1))
+    
+    df[area] <- sum(N) - length(unique(tmp$urban))
+  }
+  
+  data_list = list(m=n_admin1,
+                   m_data = n_admin1,
+                   data_areas = 1:n_admin1,
+                   y=sim.admin1.dir$mean,
+                   v_hat_scaled = v_hat_scaled,
+                   Cons=Cons,
+                   df=df,
+                   # covariates in mean model
+                   p_mean = length(covariates) + 1,
+                   X = cbind(rep(1,n_admin1),sim.admin1.dir[,covariates]),
+                   # covariates in log-variance model (none for now)
+                   p_var = 1,
+                   Z = matrix(1,n_admin1,1),
+                   N_edges = nrow(nodes1),
+                   node1 = nodes1$node1,
+                   node2 = nodes1$node2,
+                   car_scale = Q1_scaled[1,1]/Q.admin1[1,1]) 
+  
+  
+  # Fit the model
+  fit <- mod0$sample(
+    data = data_list,
+    chains = 4,
+    parallel_chains = 4,
+    refresh = 0,
+    iter_warmup = 1000,
+    iter_sampling = 1000
+  )
+  
+  eta.samples3a <- as.matrix(unclass(fit$draws(variables = c("theta"), format = "matrix")))
+  
+  Cons <- v_hat_scaled <- df<- rep(NA,length(data_areas))
+  for(area in data_areas){
+    id <- which(area==data_areas)
+    
+    tmp <- sampled_clusters[[k]] %>% filter(admin1 == admin.key[admin.key$admin2==area,]$admin1) %>% 
+      group_by(cluster,urban,admin2) %>% reframe(n=n())
+    N = c(sum(tmp$urban),sum(1-tmp$urban))
+    
+    tmp_D <- sampled_clusters[[k]] %>% filter(admin2 == area) %>% group_by(cluster,urban) %>% reframe(n=n())
+    N_D = c(sum(tmp_D$urban),sum(1-tmp_D$urban))
+    
+    # outputs 
+    Cons[id] <- 1/(sum(tmp_D$n)) #multiplier for variance term in weighted mean distribution
+    
+    # rescale to be in terms of chi square approximation
+    v_hat_scaled[id] <- sim.admin2.dir[sim.admin2.dir$admin2==area,]$variance*sum(N_D)^2/mean(N/(N-1))
+    
+    df[id] <- max(1,sum(N_D) - length(unique(tmp_D$urban)))
+  }
+  
+  data_list = list(m=n_admin2,
+                   m_data = length(data_areas),
+                   data_areas = data_areas,
+                   y=sim.admin2.dir[!is.na(sim.admin2.dir$mean),]$mean,
+                   v_hat_scaled = v_hat_scaled,
+                   df=df,
+                   # constant for likelihood
+                   Cons = Cons,
+                   # covariates in mean model
+                   p_mean = length(covariates) + 1,
+                   X = cbind(rep(1,n_admin2),sim.admin2.dir[,covariates]),
+                   # covariates in log-variance model (none for now)
+                   p_var = 1,
+                   Z = matrix(1,n_admin2,1),
+                   N_edges = nrow(nodes2),
+                   node1 = nodes2$node1,
+                   node2 = nodes2$node2,
+                   car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
+  
+  # Fit the model
+  fit <- mod0$sample(
+    data = data_list,
+    chains = 4,
+    parallel_chains = 4,
+    refresh = 0,
+    iter_warmup = 1000,
+    iter_sampling = 1000
+  )
+  
+  eta.samples3 <- as.matrix(unclass(fit$draws(variables = c("theta"), format = "matrix")))
+  
   ## record estimates -----
   
   results.adm2[[k]] <- merge(sim.admin2.dir[,c('admin2','mean','variance','var.truth')],
@@ -215,13 +351,18 @@ for(k in 1:2){
                                         # standard FH
                                         mean.fh.std  = apply(eta.samples2,2,mean),
                                         var.fh.std = apply(eta.samples2,2,var),
-                                        lower.std = apply(eta.samples2,2,quantile,prob=0.05),
-                                        upper.std = apply(eta.samples2,2,quantile,prob=0.95),
+                                        lower.fh.std = apply(eta.samples2,2,quantile,prob=0.05),
+                                        upper.fh.std = apply(eta.samples2,2,quantile,prob=0.95),
                                         # uses correct variance
                                         mean.fh.oracle  = apply(eta.samples1,2,mean),
                                         var.fh.oracle = apply(eta.samples1,2,var),
                                         lower.fh.oracle = apply(eta.samples1,2,quantile,prob=0.05),
                                         upper.fh.oracle = apply(eta.samples1,2,quantile,prob=0.95),
+                                        # naive smoothing
+                                        mean.fh.naive  = apply(eta.samples3,2,mean),
+                                        var.fh.naive = apply(eta.samples3,2,var),
+                                        lower.fh.naive = apply(eta.samples3,2,quantile,prob=0.05),
+                                        upper.fh.naive = apply(eta.samples3,2,quantile,prob=0.95),
                                         sim = k,
                                         true_mean = params_list$admin2_means),all=T)
   
@@ -237,6 +378,11 @@ for(k in 1:2){
                                         var.fh.oracle = apply(eta.samples1a,2,var),
                                         lower.fh.oracle = apply(eta.samples1a,2,quantile,prob=0.05),
                                         upper.fh.oracle = apply(eta.samples1a,2,quantile,prob=0.95),
+                                        # naive smoothing
+                                        mean.fh.naive  = apply(eta.samples3a,2,mean),
+                                        var.fh.naive = apply(eta.samples3a,2,var),
+                                        lower.fh.naive = apply(eta.samples3a,2,quantile,prob=0.05),
+                                        upper.fh.naive = apply(eta.samples3a,2,quantile,prob=0.95),
                                         sim = k,
                                         true_mean = params_list$admin1_means),all=T)
   

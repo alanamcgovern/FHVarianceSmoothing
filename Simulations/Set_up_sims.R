@@ -432,7 +432,7 @@ for(k in 1:nsim){
   sim_sample[,n:=NULL]
   
   ## save info (weights and sample sizes) on sampled cluster for Satt approx
-  sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
+  sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
   
   
   # get direct estimates (not accounting for stratification) --------

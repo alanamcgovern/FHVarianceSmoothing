@@ -1,5 +1,5 @@
 //
-// This Stan program defines an MCMC algorithm for estimating IID Fay Herriot model with variance smoothing
+// This Stan program 
 // 
 //
 
@@ -16,12 +16,14 @@ functions {
 
 data {
   int<lower=1> m;                  // number of areas
-  int<lower=1> m_data;                  // number of areas with estimates
-  array[m_data] int data_areas;       // which areas have data
+  int<lower=1> m_data;                  // number of areas with data
+  array[m_data] int data_areas;       // which area have data
   vector[m_data] y;                     // direct estimates
-  vector[m_data] v;           // variance estimates
-  vector[m_data] N;  // #sampled clusters
-  vector[m_data] N_D;  // #sampled clusters in domain
+  vector[m_data] v_hat_scaled;         // variance estimates, rescaled for chi square approximation
+  
+  //constants for Satt approximation
+  vector[m_data] Cons;
+  vector[m_data] df;
   
   // Covariates for the mean model
   int<lower=1> p_mean;             // number of mean covariates
@@ -36,9 +38,9 @@ data {
 parameters {
   vector[p_mean] beta;             // coefficients for mean model
   vector[p_var] gamma;             // coefficients for variance model
-  matrix[2, m] u_raw;    
+  matrix[2, m] u_raw;   
   vector<lower=0>[2] sig_u;
-  cholesky_factor_corr[2] L_u; // for correlation between random effects
+//  cholesky_factor_corr[2] L_u; // for correlation between random effects
 }
 
 transformed parameters {
@@ -46,23 +48,20 @@ transformed parameters {
   vector[m_data] theta_data;
   vector[m] log_sig2;
   vector[m_data] log_sig2_data;
-  vector<lower=0>[m_data] v_scaled;
   matrix[2, m] u; 
   
   // Correlated random effects:
-  u = (diag_pre_multiply(sig_u, L_u) * u_raw);
+ // u = (diag_pre_multiply(sig_u, L_u) * u_raw);
+  u = diag_pre_multiply(sig_u, u_raw);
 
-  
   // Mean and variance models
-  theta = X * beta +  u[1]';
+  theta = X * beta + u[1]';
   log_sig2 = Z * gamma + u[2]';
   
   for(i in 1:m_data){
     theta_data[i] = theta[data_areas[i]];
     log_sig2_data[i] = log_sig2[data_areas[i]];
   }
-  
-  v_scaled = (N.^2).*(N-1).*v./(N_D.*exp(log_sig2_data));
 
 }
 
@@ -70,25 +69,16 @@ transformed parameters {
 model {
   target += pc_sigma_lpdf(sig_u[1] | 1, 0.01);
   target += pc_sigma_lpdf(sig_u[2] | 1, 0.01);
-  L_u ~ lkj_corr_cholesky(2);        // weakly informative prior for correlation
+ // L_u ~ lkj_corr_cholesky(2);        // weakly informative prior for correlation
   to_vector(u_raw) ~ normal(0, 1);   // standard normal base for REs
   
   beta ~ normal(0, 4);
-  gamma[1] ~ normal(-3, 4);   // intercept-like prior; adjust if Z includes intercept
+  gamma[1] ~ normal(0, 4);   // intercept-like prior; adjust if Z includes intercept
   if(p_var>1){
      gamma[2:p_var] ~ normal(0,4);
   }
  
-  v_scaled ~ chi_square(N-1);
-  y ~ normal(theta_data,sqrt(exp(log_sig2_data)./N_D));
+  v_hat_scaled ~ gamma(0.5*df,0.5);
+  y ~ normal(theta_data,sqrt(exp(log_sig2_data).*Cons));
  
 }
-
-generated quantities {
-  corr_matrix[2] Omega_u;
-  real<lower=-1,upper=1> rho;
-  
-  Omega_u = multiply_lower_tri_self_transpose(L_u);  // implied correlation matrix
-  rho = Omega_u[2,1];
-}
-
