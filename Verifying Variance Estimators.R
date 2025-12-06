@@ -58,10 +58,13 @@ dat.tmp[dat.tmp$admin2 != 2,]$v005 <- 0
 # get mean
 y_bar <- sum(dat.tmp$value*dat.tmp$v005)/sum(dat.tmp$v005)
 
-# get cluster totals of linearized variable
-cluster_dt <- dat.tmp %>% group_by(cluster) %>% reframe(wt=unique(v005),yc=mean(value),n=n())
 
-cluster_dt %>% summarise(n()/(n()-1)*(1/sum(n*wt)^2)*sum(wt^2*n^2*(yc-y_bar)^2))
+cluster_dt <- dat.tmp %>% group_by(cluster) %>% reframe(wt=unique(v005),yc=mean(value),n=n())
+N <- nrow(cluster_dt)
+
+N <- sum(cluster_dt$wt>0)
+
+cluster_dt %>% summarise(N/(N-1)*(1/sum(n*wt)^2)*sum(wt^2*n^2*(yc-y_bar)^2))
 
 ## TWO STAGE UNPLANNED (stratified) ----------
 dat.tmp <- dir.dat %>% filter(admin1==1)
