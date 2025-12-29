@@ -143,14 +143,14 @@ cluster_alloc <- merge(cluster_alloc, unique.array(admin.key[,c('admin1','admin1
 cluster_alloc$strata <- cluster_alloc$admin1 + cluster_alloc$urban*n_admin1
 
 ## oversample urban even more
-  # cluster_alloc[cluster_alloc$urban==1,]$EAs <- 2*cluster_alloc[cluster_alloc$urban==1,]$EAs
-  # cluster_alloc[cluster_alloc$urban==0,]$EAs <- round(0.5*cluster_alloc[cluster_alloc$urban==0,]$EAs)
+   cluster_alloc[cluster_alloc$urban==1,]$EAs <- 2*cluster_alloc[cluster_alloc$urban==1,]$EAs
+   cluster_alloc[cluster_alloc$urban==0,]$EAs <- round(0.5*cluster_alloc[cluster_alloc$urban==0,]$EAs)
 
 
 ## urban is oversampled in most (90%) areas
-merge(ea_totals %>% group_by(NAME_1) %>% summarise(urb_frac_pop = sum(urban*EAs)/sum(EAs)),cluster_alloc %>% 
-        group_by(NAME_1) %>% summarise(urb_frac_sample = sum(urban*EAs)/sum(EAs))) %>% 
-  ggplot() + geom_point(aes(urb_frac_pop,urb_frac_sample)) + geom_abline(intercept = 0,slope = 1)
+# merge(ea_totals %>% group_by(NAME_1) %>% summarise(urb_frac_pop = sum(urban*EAs)/sum(EAs)),cluster_alloc %>% 
+#         group_by(NAME_1) %>% summarise(urb_frac_sample = sum(urban*EAs)/sum(EAs))) %>% 
+#   ggplot() + geom_point(aes(urb_frac_pop,urb_frac_sample)) + geom_abline(intercept = 0,slope = 1)
 
 # sort population into clusters -----------
 cluster_frame <- ea_totals[rep(1:.N, EAs)]
@@ -200,8 +200,9 @@ cluster_frame <- merge(cluster_frame,sim_pop_long[,.N,cluster],by='cluster')
 # average number of individuals to sample from each cluster 
 n_per_EA <- 10
 
-#cluster_frame$n <-  rnbinom(nrow(cluster_frame),size=10,mu = n_per_EA) + 1 #number that will be sampled from that cluster if sampled
-cluster_frame$n <-  rpois(nrow(cluster_frame),n_per_EA)
+cluster_frame$n <-  rnbinom(nrow(cluster_frame),size=10,mu = n_per_EA) + 1 #number that will be sampled from that cluster if sampled
+#cluster_frame$n <-  rnbinom(nrow(cluster_frame), size=10, mu = n_per_EA)
+#cluster_frame$n <-  rpois(nrow(cluster_frame),n_per_EA)
 cluster_frame[cluster_frame$n<1,]$n <- 1
 cluster_frame$n <- pmin(cluster_frame$n,0.75*round(cluster_frame$N))
 
@@ -209,12 +210,12 @@ cluster_frame$n <- pmin(cluster_frame$n,0.75*round(cluster_frame$N))
 cluster_alloc <- left_join(cluster_alloc, sim_pop_long[,.N,by=strata],by='strata') %>% rename(strata_total=N)
 
 cluster_frame <- merge(cluster_frame,cluster_alloc,by=c('admin1','NAME_1','urban','admin1.char','strata')) %>% 
-  mutate(wt = strata_total/(EAs*n), # individual sampling weight for all in cluster
+  mutate(wt = strata_total/(EAs*n)/1e3, # individual sampling weight for all in cluster
          pik = EAs*N/strata_total) # inclusion probability of cluster
 cluster_frame[,EAs:=NULL]
 cluster_frame[,strata_total:=NULL]
 
-# helper functions and objects ----------
+# helper function ----------
 
 ## admin2
 admin2.HT.withNA <- function(which.area) {
@@ -253,38 +254,39 @@ var_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,var_covariates])
 
 # simulation parameters and generate surface ------
 sig_u <- c(sqrt(0.1),sqrt(0.05))
-phi <- c(0.75,0.5)
+phi <- c(0.75,0.75)
 
 W1 <- sig_u[1]^2*((1-phi[1])*diag(1,n_admin2) + phi[1]*Q2_scaled_inv)
 W2 <- sig_u[2]^2*((1-phi[2])*diag(1,n_admin2) + phi[2]*Q2_scaled_inv)
 
-beta <- c(-1, -0.025, -0.025, 0.05)
-gamma <- c(0.5, -0.025, -0.025, 0.05)
+beta <- c(-1, -0.1, -0.1, 0.2)
+gamma <- c(0.5, -0.15, -0.1, 0.25)
 
-## setting 1 + 2:
-delta_mean <- 0
+# delta_mean <- 0
+# kappa_var <- 1
+
+# setting 1/2/4
+delta_mean <- 2
 kappa_var <- 1
 
-# ## setting 3
-#kappa_mean <- 0.5
-#kappa_var <- 1
+# setting 3
+# delta_mean <- rnorm(n_admin2,1,1)
+# kappa_var <- rnorm(n_admin2,2,0.5)
 
-# ## setting 4
-  # kappa_mean <- 1
-  # kappa_var <- 2
-
-# setting 5
-  # delta_mean <- 1
-  # kappa_var <- 2
-
-admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
-admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
-admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
-
-sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
-sig2 <- c(sig2_R, kappa_var*sig2_R)
+# admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
+# admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
+# admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
 # 
+# sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
+# sig2 <- c(sig2_R, kappa_var*sig2_R)
+# 
+# # setting 1-3
 # sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
+
+# setting 4
+ df_t <- 5
+ s = sqrt(sig2*(df_t-2)/df_t)
+# sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
 
 ## check
 # plot(admin2_mean,sim_pop_long[order(admin2),mean(value),by=admin2]$V1)
@@ -296,14 +298,16 @@ for(k in 1:100){
   
   cat(k,'\n')
   
-  # admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
-  # admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
-  # admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
-  # 
-  # sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
-  # sig2 <- c(sig2_R, kappa_var*sig2_R)
+  admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
+  admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
+  admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
+
+  sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
+  sig2 <- c(sig2_R, kappa_var*sig2_R)
+
+ # sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
   
-  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
+   sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
 
   # PPS sampling of clusters
   cluster_sample_ids <- unlist(sapply(unique(cluster_frame$strata),function(i){
@@ -320,11 +324,11 @@ for(k in 1:100){
   
   ## save info (weights and sample sizes) on sampled cluster for Satt approx
   sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
-  
-  # true_vals[[k]] <- list(sig2 = sig2,
-  #                        admin2_mean = admin2_mean,
-  #                        admin2_strata_mean = admin2_strata_mean)
-  # 
+
+  true_vals[[k]] <- list(sig2 = sig2,
+                         admin2_mean = admin2_mean,
+                         admin2_strata_mean = admin2_strata_mean)
+
   my.svydesign <- survey::svydesign(ids = stats::formula("~cluster"),strata = ~strata,
                                     weights = ~wt, data = sim_sample)
   
@@ -336,7 +340,7 @@ for(k in 1:100){
 
 
 # save all the relevant objects -------
-setting <- 1
+setting <- 14
 
 setwd(paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations'))
 
@@ -353,7 +357,7 @@ save(cluster_alloc,file='cluster_alloc.rda')
 save(cluster_frame,file='cluster_frame.rda')
 save(sampled_clusters,file='sampled_clusters.rda')
 save(direct,file='direct.rda')
-#save(true_vals,file='true_vals.rda')
+save(true_vals,file='true_vals.rda')
 
 objects <- list(admin.key = admin.key,
                 nodes1 = nodes1,
@@ -364,11 +368,11 @@ objects <- list(admin.key = admin.key,
 
 save(objects,file='objects.rda')
 
-params <- list(sig2 = sig2,
+params <- list(#sig2 = sig2,
                beta = beta,
                gamma = gamma,
-               admin2_mean = admin2_mean,
-               admin2_strata_mean = admin2_strata_mean,
+               #admin2_mean = admin2_mean,
+               #admin2_strata_mean = admin2_strata_mean,
                sig_u = sig_u,
                phi = phi)
 

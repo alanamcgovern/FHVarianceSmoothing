@@ -44,10 +44,6 @@ data {
   vector[m_data] y;                     // direct estimates
   vector[m_data] v_hat_scaled;         // variance estimates, rescaled for chi square approximation
   
-  int sig2_level;
-  int len_sig2;
-  array[m_data] int sig2_id;
-  
   //constants for Satt approximation
   int lenq;
   int len_kappa_seq;
@@ -57,8 +53,9 @@ data {
   array[m_data] int q_start;
   array[m_data] int q_per_area;
   matrix[lenq,len_kappa_seq] q_mat;
-  matrix[lenq,len_kappa_seq] nu_main;
-  matrix[lenq,len_kappa_seq] nu_urban;
+  matrix[lenq,len_kappa_seq] nu;
+ //vector[lenq] q_mat;
+ //vector[lenq] nu;
   
   // Covariates for the mean model
   int<lower=1> p_mean;             // number of mean covariates
@@ -66,22 +63,16 @@ data {
 
   // Covariates for the variance model
   int<lower=1> p_var;              // number of variance covariates
-  matrix[len_sig2, p_var] Z;              // covariate matrix for variance model
+  matrix[m, p_var] Z;              // covariate matrix for variance model
   
   int<lower=0,upper=1> bym2_mean;   // 1 = BYM2 for mean model, 0 = IID
   int<lower=0,upper=1> bym2_var;    // 1 = BYM2 for variance model, 0 = IID
   
-  // Adjacency (undirected) for ICAR admin1
-  int<lower=0> N_edges1;            // number of edges
-  array[N_edges1] int<lower=1, upper=m> node1_1;
-  array[N_edges1] int<lower=1, upper=m> node1_2;
-  real<lower=0> car_scale1;
-  
    // Adjacency (undirected) for ICAR admin2
-  int<lower=0> N_edges2;            // number of edges
-  array[N_edges2] int<lower=1, upper=m> node2_1;
-  array[N_edges2] int<lower=1, upper=m> node2_2;
-  real<lower=0> car_scale2;
+  int<lower=0> N_edges;            // number of edges
+  array[N_edges] int<lower=1, upper=m> node_1;
+  array[N_edges] int<lower=1, upper=m> node_2;
+  real<lower=0> car_scale;
 }
 
 // The parameters accepted by the model. 
@@ -89,9 +80,9 @@ parameters {
   vector[p_mean] beta;             // coefficients for mean model
   vector[p_var] gamma;             // coefficients for variance model
   vector[m] u1;
-  vector[len_sig2] u2;
+  vector[m] u2;
   vector[m] s1_raw; // ICAR
-  vector[len_sig2] s2_raw;
+  vector[m] s2_raw;
   vector<lower=0>[2] sig_u;
   real<lower=0,upper=1> phi1;
   real<lower=0,upper=1> phi2;
@@ -100,29 +91,25 @@ parameters {
 
 transformed parameters {
   vector[m] theta;
-  vector[m] theta_drop;
-  vector[len_sig2] log_sig2;
+  vector[m] log_v;
   vector[m_data] theta_data;
-  vector<lower=0>[m_data] sig2_data;
+  vector<lower=0>[m_data] v_data;
   vector<lower=0>[m_data] v_raw;
   vector[m] s1; // ICAR
-  vector[len_sig2] s2;
+  vector[m] s2;
   vector[m] b1;
-  vector[len_sig2] b2;
+  vector[m] b2;
   vector[lenq] q;
-  vector[lenq] nu;
+  vector[lenq] delta;
   matrix[m_data,2] sums;
   vector[m_data] df;
   real kappa_trans;
   
   kappa_trans = log(kappa+1);
   
-  s1 = (s1_raw - mean(s1_raw))/sqrt(car_scale2);
-  if(sig2_level ==2){
-    s2 = (s2_raw - mean(s2_raw))/sqrt(car_scale2);
-  }else{
-    s2 = (s2_raw - mean(s2_raw))/sqrt(car_scale1);
-  }
+  s1 = (s1_raw - mean(s1_raw))/sqrt(car_scale);
+  s2 = (s2_raw - mean(s2_raw))/sqrt(car_scale);
+  
   
    // random effects:
   if(bym2_mean==1){
@@ -138,26 +125,23 @@ transformed parameters {
   }
 
   theta = X * beta + b1;
-  theta_drop = theta - X[,2]*beta[2];
-  log_sig2 = Z * gamma + b2;
+  log_v = Z * gamma + b2;
   
+  //q = q_mat;
+  //delta = square(nu*beta[2])./exp(log_v[q_id]);
   q = interpolate_vec(kappa,kappa_seq,q_mat);
-  nu = interpolate_vec(kappa,kappa_seq,nu_main).*theta_drop[q_id] + interpolate_vec(kappa,kappa_seq,nu_urban)*beta[2];
+  delta = square(interpolate_vec(kappa,kappa_seq,nu)*beta[2])./exp(log_v[q_id]);
 
   for(a in 1:m_data){
-    vector[q_per_area[a]] delta_tmp;
-    
     theta_data[a] = theta[data_areas[a]];
-    sig2_data[a] = exp(log_sig2[sig2_id[a]]);
-    
-    delta_tmp = square(nu[q_start[a]:(q_start[a]+q_per_area[a]-1)])./sig2_data[a];
+    v_data[a] = exp(log_v[data_areas[a]]);
 
-    sums[a,1] = sum(q[q_start[a]:(q_start[a]+q_per_area[a]-1)].*(1+delta_tmp));
-    sums[a,2] = sum(square(q[q_start[a]:(q_start[a]+q_per_area[a]-1)]).*(1+2*delta_tmp));
+    sums[a,1] = sum(q[q_start[a]:(q_start[a]+q_per_area[a]-1)].*(1+delta[q_start[a]:(q_start[a]+q_per_area[a]-1)]));
+    sums[a,2] = sum(square(q[q_start[a]:(q_start[a]+q_per_area[a]-1)]).*(1+2*delta[q_start[a]:(q_start[a]+q_per_area[a]-1)]));
   }
   
   df = square(sums[,1])./sums[,2];
-  v_raw = v_hat_scaled./sig2_data.*sums[,1]./sums[,2];
+  v_raw = v_hat_scaled./v_data.*sums[,1]./sums[,2].*(Cons[,1]+kappa*Cons[,2]);
 
 }
 
@@ -166,38 +150,34 @@ model {
   target += pc_sigma_lp(sig_u[1], 1, 0.01);
   target += pc_sigma_lp(sig_u[2], 1, 0.01);
   
-  phi1 ~ beta(1,5);
-  phi2 ~ beta(1,5);
+  phi1 ~ beta(0.25,1);
+  phi2 ~ beta(0.25,1);
   
   u1 ~ normal(0,1);
   u2 ~ normal(0,1);
   
   if(bym2_mean==1){
-    target += icar_lp(s1_raw, node2_1,node2_2);
+    target += icar_lp(s1_raw, node_1,node_2);
   }else{
     s1_raw ~ normal(0,1);
   }
   
-  if(bym2_var==1 && sig2_level ==2){
-    target += icar_lp(s2_raw, node2_1,node2_2);
-  }else if(bym2_var==1 && sig2_level ==1){
-    target += icar_lp(s2_raw, node1_1,node1_2);
+  if(bym2_var==1){
+    target += icar_lp(s2_raw, node_1,node_2);
   }else{
     s2_raw ~ normal(0,1);
   }
   
   kappa_trans ~ normal(0,0.5);
   
- beta[1] ~ normal(0, 2);
-  if(p_mean>1){
-     beta[2:p_mean] ~ normal(0,1);
-  }
-  gamma[1] ~ normal(0, 2);
+  beta ~ normal(0, 2);
+  
+  gamma[1] ~ normal(-3, 0.5);
   if(p_var>1){
      gamma[2:p_var] ~ normal(0,1);
   }
  
   v_raw ~ gamma(0.5*df,0.5);
-  y ~ normal(theta_data,sqrt(sig2_data./(Cons[,1]+kappa*Cons[,2])));
+  y ~ normal(theta_data,sqrt(v_data));
 
 }

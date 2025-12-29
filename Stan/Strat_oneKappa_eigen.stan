@@ -26,14 +26,19 @@ data {
   vector[m_data] v_hat_scaled;         // variance estimates, rescaled for chi square approximation
   
   //constants for Satt approximation
-  int lenq;
-  array[lenq] int q_id;
-  array[m_data] int q_start;
-  array[m_data] int q_per_area;
-  vector[lenq] q;
-  vector[lenq] nu;
-  vector[m_data] Cons;
+  int len_obs;
+  vector[len_obs] urban_id;
+  vector[len_obs] n_vec;
+  vector[len_obs] wt_vec;
+  matrix[m_data,2] Cons;
+  array[m_data] int start_id;
+  array[m_data] int obs_per_area;
+  array[m_data] int ranks;
+  int ncol_C;
+  matrix[len_obs,ncol_C] C_long;
   
+  //real kappa;
+ 
   // Covariates for the mean model
   int<lower=1> p_mean;             // number of mean covariates
   matrix[m, p_mean] X;             // covariate matrix for all areas
@@ -63,27 +68,19 @@ parameters {
   vector<lower=0>[2] sig_u;
   real<lower=0,upper=1> phi1;
   real<lower=0,upper=1> phi2;
+  real<lower=-1> kappa;
 }
 
 transformed parameters {
-  vector[m] theta;
-  vector[m] theta_drop;
-  vector[m] log_sig2;
-  vector[m_data] theta_data;
-  vector<lower=0>[m_data] v_data;
-  vector<lower=0>[m_data] v_raw;
-  vector[m] s1; // ICAR
-  vector[m] s2;
-  vector[m] b1;
-  vector[m] b2;
-  vector[lenq] delta;
-  matrix[m_data,2] Q;
-  vector[m_data] df;
   
-  s1 = (s1_raw - mean(s1_raw))/sqrt(car_scale);
-  s2 = (s2_raw - mean(s2_raw))/sqrt(car_scale);
+  real kappa_trans = log(kappa+1);
+  
+  vector[m] s1 = (s1_raw - mean(s1_raw))/sqrt(car_scale);
+  vector[m] s2 = (s2_raw - mean(s2_raw))/sqrt(car_scale);
   
    // random effects:
+  vector[m] b1;
+  vector[m] b2;
   if(bym2_mean==1){
     b1 = sig_u[1]*(sqrt(phi1)*s1 + sqrt(1-phi1)*u1);
   }else{
@@ -96,21 +93,35 @@ transformed parameters {
     b2 = sig_u[2]*u2;
   }
 
-  theta = X * beta + b1;
-  log_sig2 = Z * gamma + b2;
+  vector[m] theta = X * beta + b1;
+  vector[m] log_v = Z * gamma + b2;
   
-  delta = square(nu*beta[2])./exp(log_sig2[q_id]);
-
+  vector[m_data] theta_data;
+  vector<lower=0>[m_data] v_data;
+  matrix[m_data,2] sums;
+  
   for(a in 1:m_data){
-    theta_data[a] = theta[data_areas[a]];
-    v_data[a] = exp(log_sig2[data_areas[a]])*Cons[a];
+    vector[obs_per_area[a]] wt_tmp= wt_vec[start_id[a]:(start_id[a] + obs_per_area[a]-1)];
+    vector[obs_per_area[a]] n_tmp= n_vec[start_id[a]:(start_id[a] + obs_per_area[a]-1)];
+    vector[obs_per_area[a]] urban_tmp= urban_id[start_id[a]:(start_id[a] + obs_per_area[a]-1)];
+    vector[obs_per_area[a]] S_sqrt_vec= sqrt((1+kappa*urban_tmp)./n_tmp);
+    matrix[obs_per_area[a],obs_per_area[a]] C= C_long[start_id[a]:(start_id[a] + obs_per_area[a]-1),1:obs_per_area[a]];
     
-    Q[a,1] = sum(q[q_start[a]:(q_start[a]+q_per_area[a]-1)].*(1+delta[q_start[a]:(q_start[a]+q_per_area[a]-1)]));
-    Q[a,2] = sum(square(q[q_start[a]:(q_start[a]+q_per_area[a]-1)]).*(1+2*delta[q_start[a]:(q_start[a]+q_per_area[a]-1)]));
+    tuple(matrix[obs_per_area[a],obs_per_area[a]], vector[obs_per_area[a]]) ev = eigendecompose_sym(diag_matrix(S_sqrt_vec)*C*diag_matrix(S_sqrt_vec));
+    matrix[obs_per_area[a],ranks[a]] U=ev.1[,(obs_per_area[a]-ranks[a]+1):obs_per_area[a]];
+    vector[ranks[a]] q=ev.2[(obs_per_area[a]-ranks[a]+1):obs_per_area[a]];
+    
+    vector[ranks[a]] delta = sum(square(wt_tmp).*n_tmp)/square(sum(wt_tmp.*n_tmp))*square(U'*diag_matrix(1/S_sqrt_vec)*urban_tmp*beta[2])./exp(log_v[data_areas[a]]);
+
+    sums[a,1] = sum(q.*(1+delta));
+    sums[a,2] = sum(square(q).*(1+2*delta));
+    
+    theta_data[a] = theta[data_areas[a]];
+    v_data[a] = exp(log_v[data_areas[a]]);
   }
   
-  df = square(Q[,1])./Q[,2];
-  v_raw = v_hat_scaled./v_data.*Q[,1]./Q[,2];
+  vector[m_data] df = square(sums[,1])./sums[,2];
+  vector<lower=0>[m_data] v_raw = v_hat_scaled./v_data.*sums[,1]./sums[,2].*(Cons[,1]+kappa*Cons[,2]);
 
 }
 
@@ -119,8 +130,8 @@ model {
   target += pc_sigma_lp(sig_u[1], 1, 0.01);
   target += pc_sigma_lp(sig_u[2], 1, 0.01);
   
-  phi1 ~ beta(0.25,1);
-  phi2 ~ beta(0.25,1);
+  phi1 ~ beta(1,5);
+  phi2 ~ beta(1,5);
   
   u1 ~ normal(0,1);
   u2 ~ normal(0,1);
@@ -137,9 +148,11 @@ model {
     s2_raw ~ normal(0,1);
   }
   
+  kappa_trans ~ normal(0,0.5);
+  
   beta ~ normal(0, 2);
   
-  gamma[1] ~ normal(-3, 0.5);
+  gamma[1] ~ normal(-3, 2);
   if(p_var>1){
      gamma[2:p_var] ~ normal(0,1);
   }
