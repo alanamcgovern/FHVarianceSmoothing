@@ -14,14 +14,16 @@ library(cmdstanr)
 
 source("/Users/alanamcgovern/Desktop/Research/my_helpers.R")
 
-setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing")
+setwd("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing")
 
 # load simulation objects -------------
-setting <- 2
+setting <- 3
 
 load(file=paste0('Simulations/Sim',setting,'/direct.rda'))
 load(file=paste0('Simulations/Sim',setting,'/params.rda'))
 load(file=paste0('Simulations/Sim',setting,'/cmat_admin2.rda'))
+load(file=paste0('Simulations/Sim',setting,'/sampled_clusters.rda'))
+#load(file=paste0('Simulations/Sim',setting,'/true_vals.rda'))
 
 # load geometry ------
 setwd('Kenya_Example')
@@ -184,9 +186,84 @@ for(k in 1:100){
 
 }
 
+# what is Satterwhaite scale and df under correct parameters -------
+
+scale_mat <- df_mat <- matrix(NA,100,n_admin2)
+
+for(k in 1:100){
+  dir.dat <- direct[[k]]
+  
+  change_id <- which(dir.dat$variance < 1e-10)
+  if(length(change_id)>0){
+    dir.dat[change_id,]$mean <- NA
+  }
+  
+  data_areas <- which(!is.na(dir.dat$mean))
+  tol <- 1e-10
+  params_tmp <- sapply(data_areas,function(area){
+    tmp <- sampled_clusters[[k]] %>% filter(admin1 == admin.key[admin.key$admin2 == area,]$admin1) %>% arrange(urban)# %>% mutate(wt=wt/1e3)
+    tmp$wt <- pmin(tmp$wt,quantile(tmp$wt,0.95))
+    tmp[tmp$admin2 != area,]$wt <- 0
+    N <- c(sum(1-tmp$urban),sum(tmp$urban))
+    
+    omega <- tmp$n*tmp$wt
+    
+    B_comps <- lapply(1:2,function(h){
+      if(N[h]>0){
+        return(N[h]/(N[h]-1)*(diag(1,N[h]) - 1/N[h]*matrix(1,N[h],N[h])))
+      }
+    })
+    
+    which.not.null <- c(1:2)[!sapply(B_comps, is.null)]
+    B <- bdiag(B_comps[which.not.null])
+    W <- diag(omega)%*%(diag(1,sum(N)) - (rep(1,sum(N))%*%t(omega))/sum(omega))
+    M <- t(W)%*%B%*%W
+    
+    S <- diag(1/tmp$n)
+    L <- chol(S)              # S = L' L
+    Li <- backsolve(L, diag(nrow(S)))  # L^{-1}
+    A <- t(L) %*% M %*% L
+    out <- eigen(A, symmetric = TRUE)
+    u <- Li %*% out$vectors
+    
+    keep_id <- which(out$values > 1e-10)
+    q <- out$values[keep_id]
+    r <- length(q)
+    u <- u[,keep_id]
+    
+  #  mu <- c(rep(true_vals[[k]]$admin2_strata_mean[area],N[1]),rep(true_vals[[k]]$admin2_strata_mean[area + n_admin2],N[2]))
+  #  sig2_k <- true_vals[[k]]$sig2[area] #WRONG IF VARIANCE IS DIFFERENT FOR URBAN AND RURAL
+    
+    mu <- c(rep(params$admin2_strata_mean[area],N[1]),rep(params$admin2_strata_mean[area + n_admin2],N[2]))
+    sig2_k <- params$sig2_pop[area] 
+    
+    delta <- (t(u)%*%mu)^2/sig2_k
+    
+    Q1 <- sum(q*(1+delta))
+    Q2 <- sum(q^2*(1+2*delta))
+    
+    return(c(sig2_k/sum(omega)^2*Q2/Q1,Q1^2/Q2))
+    
+  })
+  
+  scale_mat[k,data_areas] <- params_tmp[1,]
+  df_mat[k,data_areas] <- params_tmp[2,]
+}
+
+scale_df <- as.data.frame(scale_mat)
+scale_df$sim <- 1:nrow(scale_df)
+scale_df <- scale_df %>% pivot_longer(cols=V1:V300,names_to = 'area',values_to = 'scale_correct')
+
+dof_df <- as.data.frame(df_mat)
+dof_df$sim <- 1:nrow(dof_df)
+dof_df <- dof_df %>% pivot_longer(cols=V1:V300,names_to = 'area',values_to = 'dof_correct')
+
+chisq_correct_params <- merge(dof_df,scale_df)
+chisq_correct_params$area <- as.numeric(str_extract(chisq_correct_params$area,'\\d+'))
+
 # SAVE RESULTS ---------
-setwd(paste0("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations/Sim",setting))
+setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim",setting))
 results.adm2 <- do.call(rbind,results.adm2)
 
 save(results.adm2,file = paste0('admin2.fh.comparisons.rda'))
-
+save(chisq_correct_params,file=paste0('correct_chisq_params.rda'))

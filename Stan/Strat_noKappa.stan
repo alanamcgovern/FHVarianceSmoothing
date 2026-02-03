@@ -26,13 +26,13 @@ data {
   vector[m_data] v_hat_scaled;         // variance estimates, rescaled for chi square approximation
   
   //constants for Satt approximation
+  vector[m_data] Cons;
   int lenq;
   array[lenq] int q_id;
   array[m_data] int q_start;
   array[m_data] int q_per_area;
   vector[lenq] q;
   vector[lenq] nu;
-  vector[m_data] Cons;
   
   // Covariates for the mean model
   int<lower=1> p_mean;             // number of mean covariates
@@ -67,7 +67,6 @@ parameters {
 
 transformed parameters {
   vector[m] theta;
-  vector[m] theta_drop;
   vector[m] log_sig2;
   vector[m_data] theta_data;
   vector<lower=0>[m_data] v_data;
@@ -78,7 +77,7 @@ transformed parameters {
   vector[m] b2;
   vector[lenq] delta;
   matrix[m_data,2] Q;
-  vector[m_data] df;
+  vector<lower=1>[m_data] df;
   
   s1 = (s1_raw - mean(s1_raw))/sqrt(car_scale);
   s2 = (s2_raw - mean(s2_raw))/sqrt(car_scale);
@@ -99,7 +98,8 @@ transformed parameters {
   theta = X * beta + b1;
   log_sig2 = Z * gamma + b2;
   
-  delta = square(nu*beta[2])./exp(log_sig2[q_id]);
+ // delta = square(nu*beta[2])./exp(log_sig2[q_id]);
+  delta = square(nu*1)./exp(log_sig2[q_id]);
 
   for(a in 1:m_data){
     theta_data[a] = theta[data_areas[a]];
@@ -110,7 +110,7 @@ transformed parameters {
   }
   
   df = square(Q[,1])./Q[,2];
-  v_raw = v_hat_scaled./v_data.*Q[,1]./Q[,2];
+  v_raw = (v_hat_scaled./v_data).*(Q[,1]./Q[,2]);
 
 }
 
@@ -139,7 +139,7 @@ model {
   
   beta ~ normal(0, 2);
   
-  gamma[1] ~ normal(-3, 0.5);
+  gamma[1] ~ normal(0.5, 0.5);
   if(p_var>1){
      gamma[2:p_var] ~ normal(0,1);
   }

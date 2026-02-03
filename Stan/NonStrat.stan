@@ -126,7 +126,7 @@ model {
   
   beta ~ normal(0, 2);
   
-  gamma[1] ~ normal(-3, 0.5);
+  gamma[1] ~ normal(0.5, 0.5);
   if(p_var>1){
      gamma[2:p_var] ~ normal(0,1);
   }

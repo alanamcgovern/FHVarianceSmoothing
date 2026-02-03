@@ -13,7 +13,7 @@ library(tidyverse)
 library(sampling)
 
 source("/Users/alanamcgovern/Desktop/Research/my_helpers.R")
-setwd('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing')
+setwd('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing')
 
 # load geometry (country specific) ------
 setwd('Kenya_Example')
@@ -243,7 +243,7 @@ admin2.HT.withNA <- function(which.area) {
 # 
 # save(cmat_admin2,file='/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations/simulated_covariates.rda')
 
-load(file='/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations/simulated_covariates.rda')
+load(file='/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/simulated_covariates.rda')
 cmat_admin2$urb_frac <- sim_pop_long[order(admin2),mean(urban),by=admin2]$V1
 
 mean_covariates <- c('X1','X2','X3')
@@ -253,40 +253,58 @@ mean_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,mean_covariates])
 var_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,var_covariates])
 
 # simulation parameters and generate surface ------
+
 sig_u <- c(sqrt(0.1),sqrt(0.05))
 phi <- c(0.75,0.75)
+#phi <- c(0,0)
 
 W1 <- sig_u[1]^2*((1-phi[1])*diag(1,n_admin2) + phi[1]*Q2_scaled_inv)
 W2 <- sig_u[2]^2*((1-phi[2])*diag(1,n_admin2) + phi[2]*Q2_scaled_inv)
 
-beta <- c(-1, -0.1, -0.1, 0.2)
-gamma <- c(0.5, -0.15, -0.1, 0.25)
+mean_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
+var_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2))
 
-# delta_mean <- 0
-# kappa_var <- 1
+setting <- 3
+# setting 1/3
+if(setting %in% c(1,3)){
+  beta <- c(-1, -0.15, -0.1, 0.25)
+  gamma <- c(0.5, -0.15, -0.1, 0.25)
+  delta_mean <- 1
+  kappa_var <- 0
+}else if(setting == 2){
+  beta <- c(-1, -0.15, -0.1, 0.25)
+  gamma <- c(0.25, -0.15, -0.1, 0.25)
+  delta_mean <- rnorm(n_admin2,0.5,0.5)
+  kappa_var <- rnorm(n_admin2,log(1.5),0.25)
+}else(
+  stop('error')
+)
 
-# setting 1/2/4
-delta_mean <- 2
-kappa_var <- 1
+admin2_rural_mean <- beta %*% t(mean_model_matrix) + mean_random_effects
+sig2_R <- exp(gamma %*% t(var_model_matrix) + var_random_effects)
+admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
+admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
 
-# setting 3
-# delta_mean <- rnorm(n_admin2,1,1)
-# kappa_var <- rnorm(n_admin2,2,0.5)
+sig2 <- c(sig2_R, exp(kappa_var)*sig2_R)
 
-# admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
-# admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
-# admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
-# 
-# sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
-# sig2 <- c(sig2_R, kappa_var*sig2_R)
-# 
-# # setting 1-3
-# sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
+if(setting %in% c(1,2)){
+  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
+}else if(setting ==3){
+  df_t <- 5
+  s = sqrt(sig2*(df_t-2)/df_t)
+  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
+}else{
+  stop('error')
+}
 
-# setting 4
- df_t <- 5
- s = sqrt(sig2*(df_t-2)/df_t)
-# sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
+params <- list(sig2 = sig2,
+               sig2_pop = sim_pop_long[order(admin2),var(value),by=admin2]$V1,
+               beta = beta,
+               gamma = gamma,
+               admin2_mean = admin2_mean,
+               admin2_strata_mean = admin2_strata_mean,
+               sig_u = sig_u,
+               phi = phi)
 
 ## check
 # plot(admin2_mean,sim_pop_long[order(admin2),mean(value),by=admin2]$V1)
@@ -298,16 +316,18 @@ for(k in 1:100){
   
   cat(k,'\n')
   
-  admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
-  admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
-  admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
-
-  sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
-  sig2 <- c(sig2_R, kappa_var*sig2_R)
-
- # sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
+  # admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
+  # admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
+  # admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
+  # 
+  # sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
+  # sig2 <- c(sig2_R, exp(kappa_var)*sig2_R)
+  # 
+  # # setting 1/2
+  # sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
   
-   sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
+  #setting 3
+ #  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
 
   # PPS sampling of clusters
   cluster_sample_ids <- unlist(sapply(unique(cluster_frame$strata),function(i){
@@ -325,9 +345,9 @@ for(k in 1:100){
   ## save info (weights and sample sizes) on sampled cluster for Satt approx
   sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
 
-  true_vals[[k]] <- list(sig2 = sig2,
-                         admin2_mean = admin2_mean,
-                         admin2_strata_mean = admin2_strata_mean)
+  # true_vals[[k]] <- list(sig2 = sig2,
+  #                        admin2_mean = admin2_mean,
+  #                        admin2_strata_mean = admin2_strata_mean)
 
   my.svydesign <- survey::svydesign(ids = stats::formula("~cluster"),strata = ~strata,
                                     weights = ~wt, data = sim_sample)
@@ -338,11 +358,9 @@ for(k in 1:100){
   direct[[k]] <- admin.dir
 }
 
-
 # save all the relevant objects -------
-setting <- 14
 
-setwd(paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations'))
+setwd(paste0('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations'))
 
 folder <- paste0('Sim',setting)
 if(!dir.exists(folder)){
@@ -357,7 +375,7 @@ save(cluster_alloc,file='cluster_alloc.rda')
 save(cluster_frame,file='cluster_frame.rda')
 save(sampled_clusters,file='sampled_clusters.rda')
 save(direct,file='direct.rda')
-save(true_vals,file='true_vals.rda')
+#save(true_vals,file='true_vals.rda')
 
 objects <- list(admin.key = admin.key,
                 nodes1 = nodes1,
@@ -367,15 +385,6 @@ objects <- list(admin.key = admin.key,
                 A_2to1 = A_2to1)
 
 save(objects,file='objects.rda')
-
-params <- list(#sig2 = sig2,
-               beta = beta,
-               gamma = gamma,
-               #admin2_mean = admin2_mean,
-               #admin2_strata_mean = admin2_strata_mean,
-               sig_u = sig_u,
-               phi = phi)
-
 save(params,file='params.rda')
 
 

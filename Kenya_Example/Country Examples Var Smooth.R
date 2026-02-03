@@ -103,15 +103,15 @@ Q2_scaled_inv <- INLA:::inla.ginv(as.matrix(Q2_scaled))
 
 # read in survey data (country specific) -------
 
-load(file=paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Kenya_Example/KEN_2022_cont_outcomes.rda'))
+load(file=paste0('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Kenya_Example/KEN_2022_cont_outcomes.rda'))
 
-# geo <- getDHSgeo(country=country,year=survey_year)
-# cluster.info <- clusterInfo(geo=geo, poly.adm1=poly.adm1, poly.adm2=poly.adm2, by.adm1 = "NAME_1",by.adm2 = "NAME_2")
+geo <- getDHSgeo(country='Kenya',year=2022)
+cluster.info <- clusterInfo(geo=geo, poly.adm1=poly.adm1, poly.adm2=poly.adm2, by.adm1 = "NAME_1",by.adm2 = "NAME_2")
 # cluster.info$data <- cluster.info$data %>%
 #   rename(NAME_1 = admin1.name, NAME_2 = admin2.name) %>%
 #   dplyr::select(-c(LONGNUM,LATNUM,geometry,admin2.name.full))
 # cluster.info$data <- merge(cluster.info$data,admin.key,by=c('NAME_1', 'NAME_2'))
-# 
+
 # set_rdhs_config(email = "amcgov@uw.edu",
 #                 project = "Spatial Modeling for Subnational Administrative Level 2 Small-Area Estimation - Under 5 Mortality Rate")
 # 
@@ -138,6 +138,15 @@ load(file=paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smo
 # save(dat,file=paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance/',country.abbrev,'_',survey_year,'_cont_outcomes.rda'))
 # 
 
+cluster.info$data <- merge(cluster.info$data, dat %>% dplyr::select(cluster,v025) %>% unique())
+
+clean_map_theme + geom_sf(data=poly.adm1,lwd=0.5,fill='transparent') +  geom_sf(data=poly.adm2,color='grey60',fill='transparent') +
+  xlab('') + ylab('') +
+  geom_point(data=cluster.info$data,aes(LONGNUM,LATNUM,col=factor(v025)),size=0.25,pch=3) +
+  scale_color_manual(name='',labels=c('1'='Urban','2'='Rural'),values=c('1'='red','2'='blue')) +
+  theme(legend.position = 'bottom',legend.text = element_text(size=12),panel.border = element_blank()) +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
 # load covariates (country specific) ----------------
 setwd('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Kenya_Example')
 
@@ -150,8 +159,12 @@ load(file='KEN_Covariates/Kenya_admin1_covariates.rda')
 cmat_admin1 <- merge(cmat_admin1,ur_weights_adm1)
 cmat_admin2 <- merge(cmat_admin2,ur_weights_adm2)
 
-# mean covariates: density_log, nt_lights_log, tthc_log, precip, temp, elev, urb_frac
-# var covariates: pop_var_log, nt_lights_var, tthc_var, precip_var, temp_var, elev_var, area_log
+mean_covariates <- c('urb_frac','density_log', 'nt_lights_log', 'tthc_log', 'precip', 'temp', 'elev')
+var_covariates <- c('urb_frac', 'pop_var_log', 'nt_lights_var_log', 'tthc_var_log', 'precip_var_log', 'temp_var_log', 'elev_var_log', 'area_log')
+
+mean_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,mean_covariates])
+var_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,var_covariates])
+
 
 # specify outcome and get direct estimates ----------
 var_t <- 'haz'
@@ -219,91 +232,6 @@ hyperpc.iid = list(prec = list(prior = "pc.prec", param = c(1, 0.01)))
 hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
                     phi = list(prior = "pc", param = c(0.5, 0.5)))
  
- fh1 <- inla(mean ~ f(admin1,model='iid',hyper=hyperpc.iid) ,#+ urb_frac,
-             family = "gaussian",
-             data = admin1.dir,
-             quantiles = c(0.05,0.95),
-             scale = 1/admin1.dir$variance,
-             control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
-             control.compute = list(config = TRUE))
- # samples <- get_inla_samples_local(fh1, 1000)
- # fh1.est <- data.frame(admin1 = 1:n_admin1,
- #                       mean = colMeans(samples[,1:n_admin1] + samples[,n_admin1+1]),
- #                       lower90 = apply(samples[,1:n_admin1] + samples[,n_admin1+1],2,quantile,0.05),
- #                       upper90 = apply(samples[,1:n_admin1] + samples[,n_admin1+1],2,quantile,0.95))
- summary(fh1)
- 
- 
- ## tthc, temp, elev
- fh1.cov <- inla(mean ~ f(admin1,model='iid',hyper=hyperpc.iid) + urb_frac + 
-                        density_log+ nt_lights_log+ tthc_log+ precip+ temp+ elev,
-                      family = "gaussian",
-                      data = admin1.dir,
-                 quantiles = c(0.05,0.95),
-                      scale = 1/admin1.dir$variance,
-                      control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
-                      control.compute = list(config = TRUE))
- summary(fh1.cov)
- 
- ## tthc, temp, elev
- fh1.bym2.cov <- inla(mean ~ f(admin1,model='bym2',hyper=hyperpc.bym2,graph = admin1.mat,scale.model = T) + urb_frac + 
-                        density_log+ nt_lights_log+ tthc_log+ precip+ temp+ elev,
-                  family = "gaussian",
-                  data = admin1.dir,
-                  quantiles = c(0.05,0.95),
-                  scale = 1/admin1.dir$variance,
-                  control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
-                  control.compute = list(config = TRUE))
- summary(fh1.bym2.cov)
- 
- var1 <- inla(log(variance) ~ 1,
-              data = admin1.dir, family = "gaussian")
- summary(var1)
- 
- var1.cov <- inla(log(variance) ~ temp + elev + nt_lights_log + tthc_log + pop_var_log+ nt_lights_var_log+ tthc_var_log+ precip_var_log+ temp_var_log+ elev_var_log+ area_log,
-                  quantiles = c(0.05,0.95),
-                  data = admin1.dir, family = "gaussian")
- summary(var1.cov)
- 
- # tthc
- var1.bym2 <- inla(log(variance) ~ f(admin1,model='bym2',hyper=hyperpc.bym2,graph = admin1.mat,scale.model = T),
-                   data = admin2.dir.stable, family = "gaussian")
- summary(var1.bym2)
- 
- #area
- var1.bym2.cov <- inla(log(variance) ~ f(admin1,model='bym2',hyper=hyperpc.bym2,graph = admin1.mat,scale.model = T) +
-                         pop_var_log+ nt_lights_var_log+ tthc_var_log+ precip_var_log+ temp_var_log+ elev_var_log+ area_log,
-                       quantiles = c(0.05,0.95),
-                   data = admin2.dir.stable, family = "gaussian")
- summary(var1.bym2.cov)
- 
- 
- fh2 <- inla(mean ~ f(admin2,model='iid',hyper=hyperpc.iid) ,#+ urb_frac,
-             family = "gaussian",
-             quantiles = c(0.05,0.95),
-             data = admin2.dir.stable,
-             scale = 1/admin2.dir.stable$variance,
-             control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
-             control.compute = list(config = TRUE))
- # samples <- get_inla_samples_local(fh2, 1000)
- # fh2.est <- data.frame(admin2 = 1:n_admin2,
- #                       mean = colMeans(samples[,1:n_admin2] + samples[,n_admin2+1]),
- #                       lower90 = apply(samples[,1:n_admin2] + samples[,n_admin2+1],2,quantile,0.05),
- #                       upper90 = apply(samples[,1:n_admin2] + samples[,n_admin2+1],2,quantile,0.95))
- summary(fh2)
- 
- # density, nt_lights, tthc, temp, elev
- fh2.cov <- inla(mean ~ f(admin2,model='iid',hyper=hyperpc.iid) + urb_frac + 
-                        density_log+ nt_lights_log+ tthc_log+ precip+ temp+ elev,
-                      family = "gaussian",
-                 quantiles = c(0.05,0.95),
-                      data = admin2.dir.stable,
-                      scale = 1/admin2.dir.stable$variance,
-                      control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
-                      control.compute = list(config = TRUE))
- summary(fh2.cov)
- 
- # nt_lights
  fh2.bym2.cov <- inla(mean ~ f(admin2,model='bym2',hyper=hyperpc.bym2,graph = admin2.mat,scale.model = T)+ urb_frac + 
                     density_log+ nt_lights_log+ tthc_log+ 
                       precip+ temp+ elev,
@@ -313,583 +241,97 @@ hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
              scale = 1/admin2.dir.stable$variance,
              control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
              control.compute = list(config = TRUE))
- summary(fh2.bym2.cov)
  
- var2 <- inla(log(variance) ~ 1,
-      data = admin2.dir.stable, family = "gaussian")
- summary(var2)
- 
- #area
- var2.cov <- inla(log(variance) ~ pop_var_log+ nt_lights_var_log+ tthc_var_log+ precip_var_log+ temp_var_log+ elev_var_log+ area_log,
-                  quantiles = c(0.05,0.95),
-              data = admin2.dir.stable, family = "gaussian")
- summary(var2.cov)
- 
- #area
- var2.bym2.cov <- inla(log(variance) ~ f(admin2,model='bym2',hyper=hyperpc.bym2,graph = admin2.mat,scale.model = T) +
-                         pop_var_log+ nt_lights_var_log+ tthc_var_log+ precip_var_log+ temp_var_log+ elev_var_log+ area_log,
-                       quantiles = c(0.05,0.95),
-                   data = admin2.dir.stable, family = "gaussian")
- summary(var2.bym2.cov)
+ std.fit <- fh2.bym2.cov$summary.fitted.values
+ std.fit$admin2 <- 1:n_admin2
  
  
-# naive smoothing, option to do BYM2 ----------
+# Naive approximation -------
+ mod <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Stan/NonStrat.stan")
  
- setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing")
- mod0 <- cmdstan_model("Stan/FH_NaiveSmooth.stan")
+ data_areas <- which(!is.na(admin2.dir.stable$mean))
+ df_naive <- v_hat_scaled_naive <- rep(NA,n_admin2)
  
- ## ADMIN1 ------------
- 
- dir.dat$urban <- ifelse(dir.dat$v025==2,0,dir.dat$v025)
- 
- Cons <- v_hat_scaled <- df<- rep(NA,n_admin1)
- for(area in 1:n_admin1){
-   tmp <- dir.dat[dir.dat$admin1==area,] %>% group_by(urban, cluster) %>% reframe(n=n(),wt=unique(v005/1e7)) %>% arrange(desc(urban))
-   N <- c(sum(tmp$urban), sum(1-tmp$urban))
-   
-   # outputs
-   Cons[area] <- 1/(sum(tmp$n)) #multiplier for variance term in weighted mean distribution
-   
-   # recale to be in terms of chi square approximation
-   v_hat_scaled[area] <- admin1.dir$variance[area]*(sum(N) - length(unique(tmp$urban)))*sum(tmp$n)
-   
-   df[area] <- sum(N) - length(unique(tmp$urban))
- }
- 
- 
- data_list = list(m=n_admin1,
-                  m_data = n_admin1,
-                  data_areas = 1:n_admin1,
-                  y=admin1.dir$mean,
-                 v_hat_scaled = v_hat_scaled,
-                 Cons=Cons,
-                 df=df,
-                  # covariates in mean model
-                 p_mean = 1,
-                 X = matrix(1,n_admin1,1),
-                  # p_mean = 2,
-                  # X = cbind(rep(1,n_admin1),admin1.dir$urb_frac),
-                  # covariates in log-variance model (none for now)
-                  p_var = 1,
-                  Z = matrix(1,n_admin1,1),
-                 bym2_mean = 1,
-                 bym2_var = 0,
-                 N_edges = nrow(nodes1),
-                 node1 = nodes1$node1,
-                 node2 = nodes1$node2,
-                 car_scale = Q1_scaled[1,1]/Q.admin1[1,1]) 
- 
- 
- # Fit the model
-
- fit <- mod0$sample(
-   data = data_list,
-   chains = 4,
-   parallel_chains = 4,
-   iter_warmup = 1000,
-   iter_sampling = 1000
- )
- 
- 
- draws <- fit$draws(c("theta"))
- fh1.est.smooth <- posterior::summarise_draws(draws)
-
- plot(fh1.est.smooth$mean,fh1$summary.fitted.values$mean)
- abline(0,1)
- 
- sig2.draws <- exp(fit$draws(c("log_sig2")))
- plot((admin1.dir$variance),posterior::summarise_draws(sig2.draws)$mean*(data_list$Cons))
- abline(0,1)
- 
- 
- ## ADMIN2 ---------
- 
- dir.dat$urban <- ifelse(dir.dat$v025==2,0,dir.dat$v025)
- 
- data_areas <- admin2.dir.stable[!is.na(admin2.dir.stable$mean),]$admin2
- 
- Cons <- v_hat_scaled <- df<- rep(NA,length(data_areas))
  for(area in data_areas){
-   id <- which(area==data_areas)
+   tmp_D <- dir.dat %>% filter(admin2 ==area) %>% group_by(v025,cluster) %>% summarise(n())
+   N_D <- c(sum(tmp_D$v025==2),sum(tmp_D$v025==1))
    
-   tmp <- dir.dat %>% filter(admin1 == admin.key[admin.key$admin2==area,]$admin1) %>% 
-     group_by(cluster,urban,admin2) %>% reframe(n=n()) %>% arrange(desc(urban))
-   N <- c(sum(tmp$urban), sum(1-tmp$urban))
-   
-   tmp_D <- dir.dat %>% filter(admin2 == area) %>% group_by(cluster,urban) %>% reframe(n=n()) %>% arrange(desc(urban))
-   N_D <- c(sum(tmp_D$urban), sum(1-tmp_D$urban))
-   
-   # outputs 
-   Cons[id] <- 1/(sum(tmp_D$n)) #multiplier for variance term in weighted mean distribution
-   
-   # rescale to be in terms of chi square approximation
-   v_hat_scaled[id] <- admin2.dir.stable[admin2.dir.stable$admin2==area,]$variance*pmax(1,sum(N_D) - length(unique(tmp_D$urban)))*sum(tmp_D$n)
-   
-   df[id] <- pmax(1,sum(N_D) - length(unique(tmp_D$urban)))
+   df_naive[area] <- pmax(1,sum(N_D) - sum(N_D>0))
+   v_hat_scaled_naive[area] <- admin2.dir.stable$variance[area]*pmax(1,sum(N_D) - sum(N_D>0)) # naive scaling
  }
  
- data_list = list(m=n_admin2,
-                  m_data = length(data_areas),
-                  data_areas = data_areas,
-                  y=admin2.dir.stable[!is.na(admin2.dir.stable$mean),]$mean,
-                  v_hat_scaled = v_hat_scaled,
-                  df=df,
-                  # constant for likelihood
-                  Cons = Cons,
-                  # covariates in mean model
-                  p_mean = 2,
-                  X = cbind(rep(1,n_admin2),admin2.dir$urb_frac),
-                  # covariates in log-variance model (none for now)
-                  p_var = 1,
-                  Z = matrix(1,n_admin2,1),
-                  bym2_mean = 1,
-                  bym2_var = 0,
-                  N_edges = nrow(nodes2),
-                  node1 = nodes2$node1,
-                  node2 = nodes2$node2,
-                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
+ data_list_naive = list(m=n_admin2,
+                        m_data=length(data_areas),
+                        data_areas = data_areas,
+                        y=admin2.dir.stable$mean[data_areas],
+                        v_hat_scaled = v_hat_scaled_naive[data_areas],
+                        df=df_naive[data_areas],
+                        p_mean = ncol(mean_model_matrix),
+                        X = mean_model_matrix,
+                        bym2_mean = 1,
+                        p_var = ncol(var_model_matrix),
+                        Z = var_model_matrix,
+                        bym2_var = 1,
+                        # all bym2 stuff
+                        N_edges = nrow(nodes2),
+                        node_1 = nodes2$node1,
+                        node_2 = nodes2$node2,
+                        car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
  
- # Fit the model
- fit <- mod0$sample(
-   data = data_list,
-   chains = 4,
-   parallel_chains = 4,
-   iter_warmup = 1000,
-   iter_sampling = 1000
- )
- 
- 
- draws <- fit$draws(c("theta"))
- fh2.est.smooth <- posterior::summarise_draws(draws)
- 
- plot(fh2.est.smooth$mean,fh2$summary.fitted.values$mean)
- abline(0,1)
- 
- # unstratified satterwhaite, option to do BYM2 ----------
- setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing")
- mod <- cmdstan_model("Stan/FH_Satt_NoStrat.stan")
- 
- ## ADMIN1 -----
- 
- Cons <- v_hat_scaled<- sum_q <- sum_q2 <- rep(NA,n_admin1)
- for(area in 1:n_admin1){
-   tmp <- dir.dat[dir.dat$admin1==area,] %>% group_by(cluster) %>% reframe(n=n(),wt=unique(v005/1e7))
-   tmp$wt <- pmin(tmp$wt, quantile(tmp$wt,0.95))
-   N = nrow(tmp)
-   
-   omega <- tmp$n*tmp$wt ## Nx1
-   D = diag(omega^2)
-   M = diag(1,N) - (rep(1,N) %*% t(omega))/sum(omega)
-   S = diag(1/tmp$n) # structure of the covariance matrix
-   q <- eigen(sqrtm(S)%*%t(M)%*%D%*%M%*%sqrtm(S))$values
-
-   sum_q[area] <- sum(q)
-   sum_q2[area] <- sum(q^2)
-
-   # outputs
-   Cons[area] <- sum(tmp$n*tmp$wt^2)/sum(tmp$n*tmp$wt)^2 #multiplier for variance term in weighted mean distribution
-
-   # recale to be in terms of chi square approximation
-   v_hat_scaled[area] <- (N-1)*sum(tmp$wt*tmp$n)^2/N*admin1.dir$variance[area]
-
- }
- 
- data_list = list(m=n_admin1,
-                  m_data = n_admin1,
-                  data_areas = 1:n_admin1,
-                  y=admin1.dir$mean,
-                  v_hat_scaled = v_hat_scaled,
-                  # constant for likelihood
-                  Cons = Cons,
-                  # quantities for chi-square approx
-                  sum_q = sum_q,
-                  sum_q2 = sum_q2,
-                  # covariates in mean model
-                  p_mean = 2,
-                  X = cbind(rep(1,n_admin1),admin1.dir$urb_frac),
-                  # covariates in log-variance model (none for now)
-                  p_var = 1,
-                  Z = matrix(1,n_admin1,1),
-                  bym2_mean = 0,
-                  bym2_var = 0,
-                  N_edges = nrow(nodes1),
-                  node1 = nodes1$node1,
-                  node2 = nodes1$node2,
-                  car_scale = Q1_scaled[1,1]/Q.admin1[1,1]) 
- 
- # Fit the model
- fit <- mod$sample(
-   data = data_list,
+ fit1 <- mod$sample(
+   data = data_list_naive,
    chains = 4,
    parallel_chains = 4,
    iter_warmup = 1000,
    iter_sampling = 1000,
-   refresh=0
- )
+  # show_messages = F,
+   #show_exceptions = F,
+   refresh=200)
  
+ theta_fit <- as.matrix(unclass(fit1$draws(variables = c("theta"), format = "matrix")))
  
- draws <- fit$draws(c("theta"))
- fh1.est.smooth.satt <- posterior::summarise_draws(draws)
+ naive.fit <- data.frame(admin2 = 1:n_admin2,
+            mean = apply(theta_fit,2,mean),
+            upper = apply(theta_fit,2,quantile,probs=0.95),
+            lower = apply(theta_fit,2,quantile,probs=0.05))
  
- plot(fh1$summary.fitted.values$mean,fh1.est.smooth.satt$mean)
+ # compare models ------
+ par(mfrow=c(1,1))
+ 
+ plot((std.fit$mean), (naive.fit$mean),
+      xlab = 'No variance smoothing',ylab='Naive variance smoothing')
  abline(0,1)
  
- sig2.draws.satt <- exp(fit$draws(c("log_sig2")))
- plot((admin1.dir$variance),posterior::summarise_draws(sig2.draws.satt)$mean*data_list$Cons)
+ plot((std.fit$`0.95quant` - std.fit$`0.05quant`), (naive.fit$upper - naive.fit$lower),
+      xlab = 'No variance smoothing',ylab='Naive variance smoothing')
  abline(0,1)
  
- plot(fh1.est$upper90 - fh1.est$lower90,fh1.est.smooth.satt$q95 - fh1.est.smooth.satt$q5)
- abline(0,1)
+ merge(poly.adm2,naive.fit) %>% ggplot() + geom_sf(aes(fill=mean))
+ merge(poly.adm2,std.fit) %>% ggplot() + geom_sf(aes(fill=mean))
  
- ## ADMIN 2 ----
+ range_mean <- range(naive.fit$mean,std.fit$mean)
+ m1 <- clean_map_theme + geom_sf(data = merge(poly.adm2,std.fit) ,aes(fill=mean)) + 
+   scale_fill_continuous(lim = range_mean) +
+   ggtitle('No variance smoothing')
  
- data_areas <- admin2.dir.stable[!is.na(admin2.dir.stable$mean),]$admin2
+ m2 <- clean_map_theme + geom_sf(data = merge(poly.adm2,naive.fit) ,aes(fill=mean)) + 
+   scale_fill_continuous(lim = range_mean) +
+   ggtitle('Variance smoothing (naive approximation)')
  
- Cons <- v_hat_scaled <-sum_q <- sum_q2 <- val1 <- val2 <- rep(NA,n_admin2)
- for(area in data_areas){
-   
-   tmp <- dir.dat %>% filter(admin1 == admin.key[admin.key$admin2==area,]$admin1) %>% group_by(admin2, cluster) %>% reframe(n=n(),wt=unique(v005/1e7)) 
-   tmp$wt <- pmin(tmp$wt, quantile(tmp$wt,0.95))
-   tmp[tmp$admin2 != area,]$wt <- 0
-   
-   # number of clusters in corresponding admin1 area
-   N <- nrow(tmp)
-   
-   omega <- tmp$n*tmp$wt ## Nx1
-   D = diag(omega^2)
-   M = diag(1,N) - (rep(1,N) %*% t(omega))/sum(omega)
-   S = diag(1/tmp$n) # structure of the covariance matrix
-   q <- eigen(sqrt(S)%*%t(M)%*%D%*%M%*%sqrt(S))$values
-   
-   val1[area] <- 1/sum(tmp[tmp$admin2 == area,]$n)
-   val2[area] <- sum(q^2)/sum(q)*sum(tmp$admin2 == area)/(sum(omega)^2)
-   
-   # # outputs
-   # Cons[area] <- c(sum(tmp$n*tmp$wt^2)/sum(tmp$n*tmp$wt)^2) #multiplier for variance term in weighted mean distribution
-   # 
-   # sum_q[area] <- sum(q)
-   # sum_q2[area] <- sum(q^2)
-   # 
-   # # rescale to be in terms of chi square approximation
-   # v_hat_scaled[area] <- sum(tmp$wt*tmp$n)^2*(N-1)/N*admin2.dir.stable[admin2.dir.stable$admin2==area,]$variance
-   
- }
- 
- data_list = list(m=n_admin2,
-                  m_data = length(data_areas),
-                  data_areas = data_areas,
-                  y=admin2.dir.stable[!is.na(admin2.dir.stable$mean),]$mean,
-                  v_hat_scaled = v_hat_scaled,
-                  # for chi square approx
-                  sum_q = sum_q,
-                  sum_q2 = sum_q2,
-                  # constant for likelihood
-                  Cons = Cons,
-                  # covariates in mean model
-                  p_mean = 2,
-                  X = cbind(rep(1,n_admin2),admin2.dir$urb_frac),
-                  # covariates in log-variance model (none for now)
-                  p_var = 1,
-                  Z = matrix(1,n_admin2,1),
-                  bym2_mean = 1,
-                  bym2_var = 0,
-                  N_edges = nrow(nodes2),
-                  node1 = nodes2$node1,
-                  node2 = nodes2$node2,
-                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
- 
- # Fit the model
- fit <- mod$sample(
-   data = data_list,
-   chains = 4,
-   parallel_chains = 4,
-   iter_warmup = 1000,
-   iter_sampling = 1000,
-   refresh=0
- )
- 
- draws <- fit$draws(c("theta"))
- fh2.est.smooth.satt <- posterior::summarise_draws(draws)
- 
- plot(fh2$summary.fitted.values$mean,fh2.est.smooth.satt$mean)
- abline(0,1)
- 
- sig2.draws.satt <- exp(fit$draws(c("log_sig2_data")))
- plot((admin2.dir.stable[data_areas,]$variance),posterior::summarise_draws(sig2.draws.satt)$mean*data_list$Cons)
- abline(0,1)
- 
- plot(fh2.est$upper90 - fh2.est$lower90,fh2.est.smooth.satt$q95 - fh2.est.smooth.satt$q5)
- abline(0,1)
+ ggarrange(plotlist = list(m1,m2),common.legend=T)
  
  
-# stratified satterwhaite, option to do BYM2 -------------
-setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing")
-mod <- cmdstan_model("Stan/FH_Satt_Strat.stan")
-
-## ADMIN1 -----
-
-dir.dat$urban <- ifelse(dir.dat$v025==2,0,dir.dat$v025)
-
-v_hat_scaled <-rep(NA,n_admin1)
-Cons <- matrix(NA,n_admin1,2)
-q <- q_id <- nu_rural <- nu_urban <- start_q <- NULL
-kappa_seq <- c(seq(-0.9,4,0.1))
-for(area in 1:n_admin1){
-  tmp <- dir.dat[dir.dat$admin1==area,] %>% group_by(urban, cluster) %>% reframe(n=n(),wt=unique(v005/1e7)) %>% arrange(desc(urban))
-  tmp$wt <- pmin(tmp$wt, quantile(tmp$wt,0.95))
-  
-  Cons[area,] <- c(sum((1-tmp$urban)*tmp$n*tmp$wt^2)/sum(tmp$n*tmp$wt)^2,sum(tmp$urban*tmp$n*tmp$wt^2)/sum(tmp$n*tmp$wt)^2) #multiplier for variance term in weighted mean distribution
-  
-  # recale to be in terms of chi square approximation
-  v_hat_scaled[area] <- sum(tmp$wt*tmp$n)^2*admin1.dir$variance[area]
-  
-  N <- c(sum(tmp$urban), sum(1-tmp$urban))
-  
-  omega <- tmp$wt*tmp$n
-  
-  M <- diag(omega) %*% (diag(1,sum(N)) - (matrix(1,sum(N),ncol=1) %*% t(omega))/sum(omega))
-  
-  # if both strata have samples
-  if(sum(N==0)==0){
-    B_comps <- lapply(1:2,function(i){
-      if(N[i]>1){
-        (N[i]/(N[i]-1))*(diag(1,N[i]) - matrix(1,N[i],1)%*%matrix(1,1,N[i])/N[i])
-      }else if(N[i]==1){
-        matrix(1,1,1)
-      }else{NULL} # shouldnt get here
-    })
-    
-    B <- bdiag(B_comps)
-  }else{
-    which.strat <- which(N!=0) # which strata has clusters?
-    B <- (N[which.strat]/(N[which.strat]-1))*(diag(1,N[which.strat]) - matrix(1,N[which.strat],1)%*%matrix(1,1,N[which.strat])/N[which.strat])
-  }
-  
-  C <- t(M)%*%B%*%M 
-  
-  S = diag(1/tmp$n) # structure of the covariance matrix
-  S_inv <- diag(1/diag(S))
-  
-  rank = nrow(tmp)-sum(N>0)
-  q_id <- c(q_id,rep(area,rank))
-  start_q <- c(start_q,max(nrow(q) +1,1))
-  q_tmp <- nu_tmp <- nu_rural_tmp <- nu_urban_tmp <- matrix(NA,rank,length(kappa_seq))
-  for(kappa in kappa_seq){
-    kappa_id <- which(kappa==kappa_seq)
-    
-    perm <- (diag(1,nrow(tmp)) + kappa*diag(tmp$urban))
-    
-    out <- eigen((perm%*%S)^(1/2)%*%C%*%(perm%*%S)^(1/2))
-    
-    q_tmp[,kappa_id] <- out$values[1:rank]
-    
-    U <- out$vectors[,1:rank]
-    
-    nu_urban_tmp[,kappa_id] <- sapply(1:rank,function(j){sum((t(U)[j,]*diag(sqrt(S_inv)))[1:N[1]])})
-    if(N[2]>0){
-      nu_rural_tmp[,kappa_id] <- sapply(1:rank,function(j){sum((t(U)[j,]*diag(sqrt(S_inv)))[(N[1]+1):sum(N)])})
-    }else{
-      nu_rural_tmp[,kappa_id] <- rep(0,rank)
-    }
-    
-  }
-  
-  q <- rbind(q,q_tmp)
-  nu_rural <- rbind(nu_rural, nu_rural_tmp)
-  nu_urban <- rbind(nu_urban, nu_urban_tmp)
-  
-}
-
-
-mean_covariates = c('urb_frac','temp','elev','tthc_log','nt_lights_log')
-#mean_covariates = c('urb_frac')
-
-
-data_list = list(m=n_admin1,
-                 m_data = n_admin1,
-                 data_areas = 1:n_admin1,
-                 len_q = nrow(q),
-                 y = admin1.dir$mean,
-                 v_hat_scaled = v_hat_scaled,
-                 len_kappa_seq = length(kappa_seq),
-                 kappa_seq=kappa_seq,
-                 # for chi square approx
-                 q = q,  nu_rural = nu_rural, nu_urban = nu_urban, 
-                 admin1_id = rep(1,n_admin1),
-                 #admin1_id = 1:n_admin1,
-                 # number of qs in each area
-                 q_per_area = as.vector(table(q_id)),
-                 # start points in q for each area
-                 start_q =  start_q,
-                 # constant for likelihood
-                 Cons = Cons,
-                 # covariates in mean model
-                 p_mean = length(mean_covariates) + 1,
-                 X = cbind(rep(1,n_admin1),admin1.dir[,mean_covariates]),
-                 # covariates in log-variance model (none for now)
-                 p_var = 1,
-                 Z = matrix(1,n_admin1,1),
-                 bym2_mean = 0,
-                 bym2_var = 0,
-                 N_edges = nrow(nodes1),
-                 node1 = nodes1$node1,
-                 node2 = nodes1$node2,
-                 car_scale = Q1_scaled[1,1]/Q.admin1[1,1]) 
-
-# Fit the model
-fit <- mod$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  show_messages = F,
-  show_exceptions = F,
-  refresh=200
-)
-
-theta_draws <- as.matrix(unclass(fit$draws(variables = c("theta"), format = "matrix")))
-plot(fh1$summary.fitted.values$mean,colMeans(theta_draws))
-abline(0,1)
-
-sig2.draws.satt <- exp(fit$draws(c("log_sig2")))
-kappa.draws <- as.matrix(unclass(fit$draws(variables = c("kappa"), format = "matrix")))
-plot((admin1.dir$variance),posterior::summarise_draws(sig2.draws.satt)$mean*(data_list$Cons[,1] + (1+colMeans(kappa.draws))*data_list$Cons[,2]))
-abline(0,1)
-
-## ADMIN2 -----------------------
-
-data_areas <- admin2.dir.stable[!is.na(admin2.dir.stable$mean),]$admin2
-
-Cons <- matrix(NA,n_admin2,2)
-v_hat_scaled <-rep(NA,n_admin2)
-q <- q_id <-  nu_rural <- nu_urban <- start_q <- admin1_id <- NULL
-kappa_seq <- c(seq(-0.9,4,0.1))
-for(area in data_areas){
-  # clusters in the larger, planned domain
-  tmp <- dir.dat[dir.dat$admin1==admin.key[admin.key$admin2==area,]$admin1,] %>% group_by(admin2, urban, cluster) %>% reframe(n=n(),wt=unique(v005/1e7)) %>% arrange(desc(urban))
-  tmp[tmp$admin2 != area,]$wt <- 0
-  
-  admin1_id <- c(admin1_id,admin.key[admin.key$admin2==area,]$admin1)
-  
-  Cons[area,] <- c(sum((1-tmp$urban)*tmp$n*tmp$wt^2)/sum(tmp$n*tmp$wt)^2,sum(tmp$urban*tmp$n*tmp$wt^2)/sum(tmp$n*tmp$wt)^2) #multiplier for variance term in weighted mean distribution
-  
-  # recale to be in terms of chi square approximation
-  v_hat_scaled[area] <- sum(tmp$wt*tmp$n)^2*admin2.dir$variance[area]
-  
-  N <- c(sum(tmp$urban), sum(1-tmp$urban))
-  
-  omega <- tmp$wt*tmp$n
-  
-  M <- diag(omega) %*% (diag(1,sum(N)) - (matrix(1,sum(N),ncol=1) %*% t(omega))/sum(omega))
-  
-  # if both strata have samples
-  if(sum(N==0)==0){
-    B_comps <- lapply(1:2,function(i){
-      if(N[i]>1){
-        (N[i]/(N[i]-1))*(diag(1,N[i]) - matrix(1,N[i],1)%*%matrix(1,1,N[i])/N[i])
-      }else if(N[i]==1){
-        matrix(1,1,1)
-      }else{NULL} # shouldnt get here
-    })
-    
-    B <- bdiag(B_comps)
-  }else{
-    which.strat <- which(N!=0) # which strata has clusters?
-    B <- (N[which.strat]/(N[which.strat]-1))*(diag(1,N[which.strat]) - matrix(1,N[which.strat],1)%*%matrix(1,1,N[which.strat])/N[which.strat])
-  }
-  
-  C <- t(M)%*%B%*%M 
-  S = diag(1/tmp$n) # structure of the covariance matrix
-  S_inv <- diag(1/diag(S))
-    
-  rank = nrow(tmp[tmp$wt>0,]) - 2 + I(sum(tmp$wt==0)>0)
-  q_id <- c(q_id,rep(area,rank))
-  start_q <- c(start_q,max(nrow(q) +1,1))
-  q_tmp <- nu_rural_tmp <- nu_urban_tmp <- matrix(NA,rank,length(kappa_seq))
-  for(kappa in kappa_seq){
-     kappa_id <- which(kappa==kappa_seq)
-     
-     perm <- (diag(1,nrow(tmp)) + kappa*diag(tmp$urban))
-     
-     out <- eigen((perm%*%S)^(1/2)%*%C%*%(perm%*%S)^(1/2))
-     
-     q_tmp[,kappa_id] <- out$values[1:rank]
-     
-     U <- out$vectors[,1:rank]
-     
-     nu_urban_tmp[,kappa_id] <- sapply(1:rank,function(j){sum((t(U)[j,]*diag(sqrt(S_inv)))[1:N[1]])})
-     if(N[2]>0){
-       nu_rural_tmp[,kappa_id] <- sapply(1:rank,function(j){sum((t(U)[j,]*diag(sqrt(S_inv)))[(N[1]+1):sum(N)])})
-     }else{
-       nu_rural_tmp[,kappa_id] <- rep(0,rank)
-     }
-     
-   }
-   
-   q <- rbind(q,q_tmp)
-   nu_rural <- rbind(nu_rural, nu_rural_tmp)
-   nu_urban <- rbind(nu_urban, nu_urban_tmp)
-  
-}
-
-data_list = list(m=n_admin2,
-                 m_data = length(data_areas),
-                 data_areas = data_areas,
-                 len_q = nrow(q),
-                 y=admin2.dir$mean[data_areas],
-                 v_hat_scaled = v_hat_scaled[data_areas],
-                 len_kappa_seq = length(kappa_seq),
-                 kappa_seq=kappa_seq,
-                 # for chi square approx
-                 q = q,  nu_rural = nu_rural, nu_urban = nu_urban, 
-               #  admin1_id = admin1_id,
-               admin1_id = rep(1,length(data_areas)),
-                 # number of qs in each area
-                 q_per_area = as.vector(table(q_id)),
-                 # start points in q for each area
-                 start_q =  start_q,
-                 # constant for likelihood
-                 Cons = Cons[data_areas,],
-                 # covariates in mean model
-                 p_mean = 2,
-                 X = cbind(rep(1,n_admin2),admin2.dir$urb_frac),
-                 # covariates in log-variance model (none for now)
-                 p_var = 1,
-                 Z = matrix(1,n_admin2,1),
-                 bym2_mean =1,
-                 bym2_var = 0,
-                 N_edges = nrow(nodes2),
-                 node1 = nodes2$node1,
-                 node2 = nodes2$node2,
-                 car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
-
-# Fit the model
-fit <- mod$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  refresh=200
-)
-
-theta_draws <- as.matrix(unclass(fit$draws(variables = c("theta"), format = "matrix")))
-plot(fh2$summary.fitted.values$mean,colMeans(theta_draws))
-abline(0,1)
-
-sig2.draws.satt <- fit$draws(c("sig2_data"))
-
-kappa.draws <- as.matrix(unclass(fit$draws(variables = c("kappa_long"), format = "matrix")))
-plot(admin2.dir.stable[data_areas,]$variance,posterior::summarise_draws(sig2.draws.satt)$mean*(data_list$Cons[,1] + (1+colMeans(kappa.draws))*data_list$Cons[,2]))
-abline(0,1)
-
-apply(theta_draws,2,quantile,probs=0.95) - apply(theta_draws,2,quantile,probs=0.05)
-
-plot(fh2$summary.fitted.values$`0.95quant` - fh2$summary.fitted.values$`0.05quant`,apply(theta_draws,2,quantile,probs=0.95) - apply(theta_draws,2,quantile,probs=0.05))
-abline(0,1)
-
-
+ range_width <- range(naive.fit$upper - naive.fit$lower, std.fit$`0.95quant` - std.fit$`0.05quant`)
+ m1 <- clean_map_theme + geom_sf(data = merge(poly.adm2,std.fit) ,aes(fill=`0.95quant` - `0.05quant`)) + 
+   scale_fill_continuous(name = 'Credible interval width',lim = range_width) +
+   ggtitle('No variance smoothing')
+ 
+ m2 <- clean_map_theme + geom_sf(data = merge(poly.adm2,naive.fit) ,aes(fill=upper - lower)) + 
+   scale_fill_continuous(name = 'Credible interval width',lim = range_width) +
+   ggtitle('Variance smoothing (naive approximation)')
+ 
+ ggarrange(plotlist = list(m1,m2),common.legend=T)
+ 
 ## properties of the data ------
 
 # are variances different between areas -- yes!
@@ -902,6 +344,12 @@ t <- dir.dat %>% group_by(admin2,v025) %>% summarise(v = var(haz)) %>% pivot_wid
 t2 <- dir.dat %>% group_by(admin2,v025) %>% summarise(m = mean(haz)) %>% pivot_wider(values_from = m, names_from = v025) %>% summarise(val = `1`-`2`)
 
 plot(t2$val,t$val)
+
+
+dir.dat %>% group_by(admin2) %>% summarise(v = log(var(haz))) %>% summarise(var(v))
+dir.dat %>% group_by(admin2) %>% summarise(v = log(var(haz))) %>% summarise(mean(v))
+
+dir.dat %>% group_by(admin2) %>% summarise(v = mean(haz)) %>% summarise(var(v))
 
 # normality of cluster means within strata
 

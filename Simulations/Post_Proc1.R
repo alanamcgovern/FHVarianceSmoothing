@@ -4,8 +4,8 @@ library(tidyverse)
 library(readr)
 library(knitr)
 
-setting <- 1
-setwd(paste0('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Simulations/Sim',setting))
+setting <- 13
+setwd(paste0('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim',setting))
 
 load(file=paste0('true_vals.rda'))
 load(file=paste0('objects.rda'))
@@ -24,7 +24,6 @@ for(j in 1:100){
   results[results$sim==j,]$true_mean <- true_vals[[j]]$admin2_mean[results[results$sim==j,]$area]
 }
 
-
 results <- results %>% mutate(ciwidth = upper - lower,
                               se = (mean-true_mean)^2,
                               cov = lower<true_mean & upper>true_mean,
@@ -35,29 +34,19 @@ var.results <- read.csv('Summary_Var.csv')
 
 hyper.results <- read.csv('Summary_hyper.csv')
 
+logsig2.results <- hyper.results %>% filter(str_detect(hyper.results$param,'sig2'))
+logsig2.results$area <- as.numeric((gsub("log_sig2\\[|\\]", "",logsig2.results$X)))
+
+logsig2.results$true_value <- NA
+for(j in 1:100){
+  # ONLY WORKS WHEN VARIANCE IS THE SAME FOR URBAN/RURAL
+  logsig2.results[logsig2.results$sim==j,]$true_value <- log(true_vals[[j]]$sig2[logsig2.results[logsig2.results$sim==j,]$area])
+}
+
 # add degrees of freedom to results
-
-df_df <- lapply(1:length(sampled_clusters),function(i){
-  dir.dat <- direct[[i]]
-  change_id <- which(dir.dat$variance < 1e-10)
-  if(length(change_id)>0)
-    dir.dat[change_id,]$mean <- NA
-  data_areas <- which(!is.na(dir.dat$mean))
-  
-  tmp1 <- sampled_clusters[[i]] %>% filter(admin2 %in% data_areas) %>% group_by(admin2) %>% reframe(n=n(),h=length(unique(urban))) %>% 
-    mutate(df = pmax(1,n-h)) %>% dplyr::select(admin2,df)
-  out1 <- left_join(data.frame(admin2 = 1:n_admin2),tmp1) %>% mutate(sim=i, model = 'Mod1') %>% rename(area = admin2)
-  
-  tmp2 <- hyper.results %>% filter(str_detect(param,'df'), sim==i, model=='Mod2') %>% rename(df=mean)
-  tmp2$admin2 <- data_areas
-  out2 <- left_join(data.frame(admin2 = 1:n_admin2),tmp2[,c('admin2','df')]) %>% mutate(sim=i, model = 'Mod2')%>% rename(area = admin2)
-  
-  return(rbind(out1,out2))
-})
-df_df <- do.call(rbind,df_df)
-
-results <- left_join(results,df_df,by=c('sim','model','area'))
-
+chisq.params <- read.csv('Summary_chisq_params.csv')
+load('correct_chisq_params.rda')
+chisq.params <- left_join(chisq.params,chisq_correct_params,by=c('sim','area'))
 
 model_labs <- c(
   Mod1 = "Naive + structured",
@@ -159,12 +148,47 @@ abline(0,1)
 
 
 # degrees of freedom
+chisq.params %>% ggplot() + geom_point(aes(dof_correct,df)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red')
 
-par(mfrow=c(1,1))
-plot(results[results$model=='Mod1',]$df,results[results$model=='Mod2',]$df,cex=0.5,xlab='Naive',ylab='Satt (no kappa)',main='Degrees of freedom')
-abline(0,1)
+chisq.params %>% filter(model %in% c('Mod1','Mod2')) %>% dplyr:select(sim,area,model,df) %>%
+  pivot_wider(id_cols=c(sim,area,dof_correct,scale_correct),values_from=scale:df,names_from=model) %>%
+  ggplot() + geom_point(aes(df_Mod1,df_Mod2)) + geom_abline(intercept = 0, slope=1)
 
 
 }
 dev.off()
 
+
+## compare estimation of log(sig2)
+logsig2.results %>% ggplot() + geom_point(aes(true_value,mean),size=0.25) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red')
+
+## compare how well difference in means is estimated
+hyper.results %>% filter(param=='beta[2]') %>% ggplot() + geom_histogram(aes(mean)) + facet_grid(~model) + geom_vline(xintercept = 1,col='red')
+
+## compare chi square params
+chisq.params %>% filter(model %in% c('Mod1','Mod2')) %>% 
+  pivot_wider(id_cols=c(sim,area,dof_correct,scale_correct),values_from=scale:df,names_from=model) %>%
+  ggplot() + geom_point(aes(df_Mod1,df_Mod2)) + geom_abline(intercept = 0, slope=1)
+
+chisq.params %>% filter(model %in% c('Mod1','Mod2')) %>% 
+  pivot_wider(id_cols=c(sim,area,dof_correct,scale_correct),values_from=scale:df,names_from=model) %>%
+  summarise(mean(df_Mod1>df_Mod2,na.rm=T))
+
+chisq.params %>% ggplot() + geom_point(aes(dof_correct,df)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red')
+chisq.params %>% filter(model %in% c('Mod1','Mod2','Mod1.5')) %>% ggplot() + geom_point(aes(scale_correct,scale)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red') 
+
+chisq.params %>% ggplot() + geom_point(aes(dof_correct*scale_correct,df*scale)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red')
+
+chisq.params %>% group_by(model) %>% summarise(mean(df*scale - dof_correct*scale_correct,na.rm=T))
+chisq.params %>% group_by(model) %>% summarise(mean(2*df*scale^2 - 2*dof_correct*scale_correct^2,na.rm=T))
+
+
+chisq.params %>% filter(model%in%c('Mod1','Mod2')) %>% ggplot() + 
+  geom_point(aes(dof_correct,df)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red')
+
+plot(chisq.params[chisq.params$model=='Mod1.5',]$df,chisq.params[chisq.params$model=='Mod1',]$df)
+abline(0,1)
+
+chisq.params %>% ggplot() + geom_point(aes(2*dof_correct*scale_correct^2,2*df*scale^2)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1,col='red')
+
+merge(var.results,chisq.params) %>% ggplot() + geom_point(aes(df*scale,mean)) + facet_grid(~model) + geom_abline(intercept = 0,slope=1)
