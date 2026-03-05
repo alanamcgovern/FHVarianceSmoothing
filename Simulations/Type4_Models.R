@@ -25,7 +25,7 @@ load(file='direct.rda')
 #domain_probs <- cluster_frame[, .N, by = .(strata, admin2, urban)]
 #domain_probs[, prop := N / sum(N), by = strata]
 
-folders <- c('Mod2','Mod2a')
+folders <- c('Mod4','Mod4a')
 for(f in folders){
   if(!dir.exists(paste0(f,'/Hyper'))){
     dir.create(paste0(f,'/Hyper'), recursive = TRUE)
@@ -57,15 +57,15 @@ q <- q_id <- nu <- NULL
 tol <- 1e-10
 for(area in data_areas){
   tmp_D <- sampled_clusters[[k]] %>% filter(admin2 == area) %>% group_by(urban) %>% summarise(N_D = n())
-#  if(sum(tmp_D$N_D>0)==2){
+  #  if(sum(tmp_D$N_D>0)==2){
   
   tmp <- sampled_clusters[[k]] %>% filter(admin1 == admin.key[admin.key$admin2 == area,]$admin1) %>% arrange(urban)# %>% mutate(wt=wt/1e3)
   tmp$wt <- pmin(tmp$wt,quantile(tmp$wt,0.95))
   
- # omega_full <- tmp$n*tmp$wt
+  # omega_full <- tmp$n*tmp$wt
   tmp[tmp$admin2 != area,]$wt <- 0
   N <- c(sum(1-tmp$urban),sum(tmp$urban))
-
+  
   omega <- tmp$n*tmp$wt
   
   B_comps <- lapply(1:2,function(h){
@@ -88,7 +88,7 @@ for(area in data_areas){
   
   out <- eigen(A, symmetric = TRUE)
   V <- Li %*% out$vectors
-
+  
   keep_id <- which(out$values > tol)
   q_tmp <- out$values[keep_id]
   q_start[area] <- length(q) + 1
@@ -98,14 +98,14 @@ for(area in data_areas){
   V <- V[,keep_id]
   nu <- c(nu,t(V)%*%tmp$urban)
   
-  v_hat_scaled_exact[area] <- dir.dat$variance[area]*(t(omega)%*%S%*%omega)
+  v_hat_scaled_exact[area] <- dir.dat$variance[area]
   
-#  p_h <- c(rep(domain_probs[admin2==area & urban== 0,]$prop,N[1]),rep(domain_probs[admin2==area & urban== 1,]$prop,N[2]))
+  #  p_h <- c(rep(domain_probs[admin2==area & urban== 0,]$prop,N[1]),rep(domain_probs[admin2==area & urban== 1,]$prop,N[2]))
   
- # cons_exact[area] <- (t(omega_full)%*%diag(p_h)%*%S%*%omega_full)/sum(p_h*omega_full)^2
+  # cons_exact[area] <- (t(omega_full)%*%diag(p_h)%*%S%*%omega_full)/sum(p_h*omega_full)^2
   cons_exact[area] <- (t(omega)%*%S%*%omega)/sum(omega)^2
- # }
-
+  # }
+  
 }
 
 data_areas <- which(!is.na(cons_exact))
@@ -129,7 +129,7 @@ data_list = list(m=n_admin2,
                        node_1 = objects$nodes2$node1,
                        node_2 = objects$nodes2$node2,
                        car_scale = objects$car_scale2,
-                       bias_adj = 0) 
+                       bias_adj = 1) 
 
 # fit with BYM2 and covariates -----------
 
@@ -146,29 +146,29 @@ fit1 <- mod1$sample(
   adapt_delta = 0.99,
   show_messages = F,
   show_exceptions = F,
-  refresh=0)
+  refresh=00)
 
 theta_fit1 <- as.matrix(unclass(fit1$draws(variables = c("theta"), format = "matrix")))
 write.csv(data.frame(sim=k,
                      area = 1:n_admin2,
-                     model = 'Mod2',
+                     model = 'Mod4',
                      mean = apply(theta_fit1,2,mean),
                      upper = apply(theta_fit1,2,quantile,probs=0.95),
-                     lower = apply(theta_fit1,2,quantile,probs=0.05)),file=paste0('Mod2/Result',k,'.csv'))
+                     lower = apply(theta_fit1,2,quantile,probs=0.05)),file=paste0('Mod4/Result',k,'.csv'))
 
 v_fit1 <- (as.matrix(unclass(fit1$draws(variables = c("v_data"), format = "matrix"))))
 write.csv(data.frame(sim=k,
                      area = data_areas,
-                     model = 'Mod2',
-                     mean = apply(v_fit1,2,mean)),file=paste0('Mod2/Hyper/Var_Result',k,'.csv'))
+                     model = 'Mod4',
+                     mean = apply(v_fit1,2,mean)),file=paste0('Mod4/Hyper/Var_Result',k,'.csv'))
 
 hyper_fit1 <- as.matrix(unclass(fit1$draws(variables = c("log_sig2","beta",'gamma','sig_u','phi1','phi2','Q'), format = "matrix")))
 
 write.csv(data.frame(sim=k,
-                     model = 'Mod2',
+                     model = 'Mod4',
                      param = colnames(hyper_fit1),
                      mean = colMeans(hyper_fit1)),
-          file=paste0('Mod2/Hyper/Hyper_Result',k,'.csv'))
+          file=paste0('Mod4/Hyper/Hyper_Result',k,'.csv'))
 
 df_fit1 <- as.matrix(unclass(fit1$draws(variables = c('df'), format = "matrix")))
 v_raw <- as.matrix(unclass(fit1$draws(variables = c('v_raw'), format = "matrix")))
@@ -177,31 +177,30 @@ scale_fit1 <- sapply(1:ncol(v_raw),function(j){dir.dat$variance[data_areas[j]]/v
 
 write.csv(data.frame(sim=k,
                      area = data_areas,
-                     model = 'Mod2',
+                     model = 'Mod4',
                      df = colMeans(df_fit1),
                      scale = colMeans(scale_fit1)),
-                     file=paste0('Mod2/Hyper/Chisq_params',k,'.csv'))
+          file=paste0('Mod4/Hyper/Chisq_params',k,'.csv'))
 
 # diagnostics
 summary_df <- fit1$summary()
 diag_df    <- fit1$diagnostic_summary()
 
 write.csv(data.frame(sim=k,
-                model = 'Mod2',
-                divergences = sum(diag_df$num_divergent),
-                max_treedepth = sum(diag_df$num_max_treedepth),
-                min_efbmi = min(diag_df$ebfmi),
-                max_rhat = max(summary_df$rhat,na.rm=T),
-                bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
-                tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
-          file=paste0('Mod2/Diagnostic/Diag_Summary_',k,'.csv'))
+                     model = 'Mod4',
+                     divergences = sum(diag_df$num_divergent),
+                     max_treedepth = sum(diag_df$num_max_treedepth),
+                     min_efbmi = min(diag_df$ebfmi),
+                     max_rhat = max(summary_df$rhat,na.rm=T),
+                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
+                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
+          file=paste0('Mod4/Diagnostic/Diag_Summary_',k,'.csv'))
 
 prob_params <- summary_df %>% filter((!is.na(rhat) & rhat > 1.01) | ess_bulk < 400 | ess_tail < 100)
 if(nrow(prob_params)>0){
-  write.csv(prob_params,file=paste0('Mod2/Diagnostic/Diag_detect_',k,'.csv'))
+  write.csv(prob_params,file=paste0('Mod4/Diagnostic/Diag_detect_',k,'.csv'))
 }
 
-rm(fit1,theta_fit1,v_fit1,hyper_fit1)
 
 
 
@@ -225,24 +224,24 @@ fit2 <- mod1$sample(
 theta_fit2 <- as.matrix(unclass(fit2$draws(variables = c("theta"), format = "matrix")))
 write.csv(data.frame(sim=k,
                      area = 1:n_admin2,
-                     model = 'Mod2a',
+                     model = 'Mod4a',
                      mean = apply(theta_fit2,2,mean),
                      upper = apply(theta_fit2,2,quantile,probs=0.95),
-                     lower = apply(theta_fit2,2,quantile,probs=0.05)),file=paste0('Mod2a/Result',k,'.csv'))
+                     lower = apply(theta_fit2,2,quantile,probs=0.05)),file=paste0('Mod4a/Result',k,'.csv'))
 
 v_fit2 <- (as.matrix(unclass(fit2$draws(variables = c("v_data"), format = "matrix"))))
 write.csv(data.frame(sim=k,
                      area = data_areas,
-                     model = 'Mod2a',
-                     mean = apply(v_fit2,2,mean)),file=paste0('Mod2a/Hyper/Var_Result',k,'.csv'))
+                     model = 'Mod4a',
+                     mean = apply(v_fit2,2,mean)),file=paste0('Mod4a/Hyper/Var_Result',k,'.csv'))
 
 hyper_fit2 <- as.matrix(unclass(fit2$draws(variables = c("log_sig2","beta",'gamma','sig_u','phi1','phi2','Q'), format = "matrix")))
 
 write.csv(data.frame(sim=k,
-                     model = 'Mod2a',
+                     model = 'Mod4a',
                      param = colnames(hyper_fit2),
                      mean = colMeans(hyper_fit2)),
-          file=paste0('Mod2a/Hyper/Hyper_Result',k,'.csv'))
+          file=paste0('Mod4a/Hyper/Hyper_Result',k,'.csv'))
 
 df_fit2 <- as.matrix(unclass(fit2$draws(variables = c('df'), format = "matrix")))
 v_raw <- as.matrix(unclass(fit2$draws(variables = c('v_raw'), format = "matrix")))
@@ -251,28 +250,27 @@ scale_fit2 <- sapply(1:ncol(v_raw),function(j){dir.dat$variance[data_areas[j]]/v
 
 write.csv(data.frame(sim=k,
                      area = data_areas,
-                     model = 'Mod2a',
+                     model = 'Mod4a',
                      df = colMeans(df_fit2),
                      scale = colMeans(scale_fit2)),
-          file=paste0('Mod2a/Hyper/Chisq_params',k,'.csv'))
-
+          file=paste0('Mod4a/Hyper/Chisq_params',k,'.csv'))
 
 # diagnostics
 summary_df <- fit2$summary()
 diag_df    <- fit2$diagnostic_summary()
 
 write.csv(data.frame(sim=k,
-                     model = 'Mod2a',
+                     model = 'Mod4a',
                      divergences = sum(diag_df$num_divergent),
                      max_treedepth = sum(diag_df$num_max_treedepth),
                      min_efbmi = min(diag_df$ebfmi),
                      max_rhat = max(summary_df$rhat,na.rm=T),
                      bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
                      tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
-          file=paste0('Mod2a/Diagnostic/Diag_Summary_',k,'.csv'))
+          file=paste0('Mod4a/Diagnostic/Diag_Summary_',k,'.csv'))
 
 prob_params <- summary_df %>% filter((!is.na(rhat) & rhat > 1.01) | ess_bulk < 400 | ess_tail < 100)
 if(nrow(prob_params)>0){
-  write.csv(prob_params,file=paste0('Mod2a/Diagnostic/Diag_detect_',k,'.csv'))
+  write.csv(prob_params,file=paste0('Mod4a/Diagnostic/Diag_detect_',k,'.csv'))
 }
 

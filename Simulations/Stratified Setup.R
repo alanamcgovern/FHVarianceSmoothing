@@ -143,14 +143,16 @@ cluster_alloc <- merge(cluster_alloc, unique.array(admin.key[,c('admin1','admin1
 cluster_alloc$strata <- cluster_alloc$admin1 + cluster_alloc$urban*n_admin1
 
 ## oversample urban even more
-   cluster_alloc[cluster_alloc$urban==1,]$EAs <- 2*cluster_alloc[cluster_alloc$urban==1,]$EAs
-   cluster_alloc[cluster_alloc$urban==0,]$EAs <- round(0.5*cluster_alloc[cluster_alloc$urban==0,]$EAs)
+ # cluster_alloc[cluster_alloc$urban==1,]$EAs <- 2*cluster_alloc[cluster_alloc$urban==1,]$EAs
+ #  cluster_alloc[cluster_alloc$urban==0,]$EAs <- round(0.5*cluster_alloc[cluster_alloc$urban==0,]$EAs)
 
 
+# 715 x 370
 ## urban is oversampled in most (90%) areas
-# merge(ea_totals %>% group_by(NAME_1) %>% summarise(urb_frac_pop = sum(urban*EAs)/sum(EAs)),cluster_alloc %>% 
-#         group_by(NAME_1) %>% summarise(urb_frac_sample = sum(urban*EAs)/sum(EAs))) %>% 
-#   ggplot() + geom_point(aes(urb_frac_pop,urb_frac_sample)) + geom_abline(intercept = 0,slope = 1)
+merge(ea_totals %>% group_by(NAME_1) %>% summarise(urb_frac_pop = sum(urban*EAs)/sum(EAs)),cluster_alloc %>%
+        group_by(NAME_1) %>% summarise(urb_frac_sample = sum(urban*EAs)/sum(EAs))) %>%
+  ggplot() + geom_point(aes(urb_frac_pop,urb_frac_sample),pch=1,size=2) + geom_abline(intercept = 0,slope = 1) + xlim(0,1) + ylim(0,1)+
+  xlab('Proportion of urban clusters in population') + ylab('Proportion of urban clusters in sample') + theme_bw()
 
 # sort population into clusters -----------
 cluster_frame <- ea_totals[rep(1:.N, EAs)]
@@ -198,22 +200,20 @@ cluster_frame <- merge(cluster_frame,sim_pop_long[,.N,cluster],by='cluster')
 
 # objects for sampling ---------
 # average number of individuals to sample from each cluster 
-n_per_EA <- 10
+# n_per_EA <- 10
+#cluster_frame$n <-  rnbinom(nrow(cluster_frame),size=10,mu = n_per_EA) + 1 #number that will be sampled from that cluster if sampled
 
-cluster_frame$n <-  rnbinom(nrow(cluster_frame),size=10,mu = n_per_EA) + 1 #number that will be sampled from that cluster if sampled
-#cluster_frame$n <-  rnbinom(nrow(cluster_frame), size=10, mu = n_per_EA)
-#cluster_frame$n <-  rpois(nrow(cluster_frame),n_per_EA)
-cluster_frame[cluster_frame$n<1,]$n <- 1
-cluster_frame$n <- pmin(cluster_frame$n,0.75*round(cluster_frame$N))
+cluster_frame$n <- 0
+cluster_frame[cluster_frame$urban==0,]$n <- rnbinom(sum(cluster_frame$urban==0),mu=11,size=4)
+cluster_frame[cluster_frame$urban==1,]$n <- rnbinom(sum(cluster_frame$urban==1),mu=9,size=8)
+cluster_frame[cluster_frame$n==0,]$n <- 1
+cluster_frame$n <- pmin(cluster_frame$n,round(0.75*cluster_frame$N))
+
+cluster_alloc <- left_join(cluster_alloc, sim_pop_long[,.N,by=strata],by='strata') %>% rename(strata_total=N)
+cluster_frame <- merge(cluster_frame,cluster_alloc,by=c('admin1','NAME_1','urban','admin1.char','strata')) %>% 
+  mutate(wt = strata_total/(EAs*n)/1e3) # inclusion probability of cluster
 
 # get population urban rural percent for weights
-cluster_alloc <- left_join(cluster_alloc, sim_pop_long[,.N,by=strata],by='strata') %>% rename(strata_total=N)
-
-cluster_frame <- merge(cluster_frame,cluster_alloc,by=c('admin1','NAME_1','urban','admin1.char','strata')) %>% 
-  mutate(wt = strata_total/(EAs*n)/1e3, # individual sampling weight for all in cluster
-         pik = EAs*N/strata_total) # inclusion probability of cluster
-cluster_frame[,EAs:=NULL]
-cluster_frame[,strata_total:=NULL]
 
 # helper function ----------
 
@@ -252,7 +252,7 @@ var_covariates <- c('X4','X5','X6')
 mean_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,mean_covariates])
 var_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,var_covariates])
 
-# simulation parameters and generate surface ------
+# global simulation parameters ------
 
 sig_u <- c(sqrt(0.1),sqrt(0.05))
 phi <- c(0.75,0.75)
@@ -264,37 +264,56 @@ W2 <- sig_u[2]^2*((1-phi[2])*diag(1,n_admin2) + phi[2]*Q2_scaled_inv)
 mean_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
 var_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2))
 
+# simulation parameters which vary by setting -----
+# setting 1: default
+# setting 2: varying urban mean and variance effects
+# setting 3: t-distributed observations
+# setting 4: increase number of sampled clusters 5x
+# setting 5: within cluster correlation
+# setting 6: urban oversample
+
 setting <- 3
-# setting 1/3
-if(setting %in% c(1,3)){
+
+if(setting == 4){
+  cluster_frame <- cluster_frame %>% mutate(pik = 5*EAs*N/strata_total)
+}else if(setting == 6){
+  cluster_frame <- cluster_frame %>% mutate(pik = 3*EAs*N/strata_total)
+}else{
+  cluster_frame <- cluster_frame %>% mutate(pik = EAs*N/strata_total)
+}
+
+if(setting == 2){
   beta <- c(-1, -0.15, -0.1, 0.25)
-  gamma <- c(0.5, -0.15, -0.1, 0.25)
-  delta_mean <- 1
+  gamma <- c(log(1.4), -0.15, -0.1, 0.25)
+  delta_mean <- rnorm(n_admin2,0.25,0.25)
+  kappa_var <- rnorm(n_admin2,0,0.5)
+}else{
+  beta <- c(-1, -0.15, -0.1, 0.25)
+  gamma <- c(log(1.5), -0.15, -0.1, 0.25)
+  delta_mean <- 0.5
   kappa_var <- 0
-}else if(setting == 2){
-  beta <- c(-1, -0.15, -0.1, 0.25)
-  gamma <- c(0.25, -0.15, -0.1, 0.25)
-  delta_mean <- rnorm(n_admin2,0.5,0.5)
-  kappa_var <- rnorm(n_admin2,log(1.5),0.25)
-}else(
-  stop('error')
-)
+}
+
+if(setting == 5){
+  rho <- 0.25
+}else{
+  rho <- 0
+}
 
 admin2_rural_mean <- beta %*% t(mean_model_matrix) + mean_random_effects
 sig2_R <- exp(gamma %*% t(var_model_matrix) + var_random_effects)
 admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
 admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
-
 sig2 <- c(sig2_R, exp(kappa_var)*sig2_R)
 
-if(setting %in% c(1,2)){
-  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
-}else if(setting ==3){
+cluster_means <- cluster_frame[, rnorm(.N, 0, sqrt(rho*sig2[admin2_strata]))]
+
+if(setting ==3){
   df_t <- 5
-  s = sqrt(sig2*(df_t-2)/df_t)
-  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
+  s = sqrt((1-rho)*sig2*(df_t-2)/df_t)
+  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + cluster_means[cluster] + s[admin2_strata]*rt(.N,df_t)]
 }else{
-  stop('error')
+  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + cluster_means[cluster] + rnorm(.N,0,sqrt((1-rho)*sig2[admin2_strata]))]
 }
 
 params <- list(sig2 = sig2,
@@ -315,19 +334,6 @@ direct <- sampled_clusters <- true_vals <- list()
 for(k in 1:100){
   
   cat(k,'\n')
-  
-  # admin2_rural_mean <- beta %*% t(mean_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
-  # admin2_strata_mean <- c(admin2_rural_mean, admin2_rural_mean + delta_mean)
-  # admin2_mean <- admin2_strata_mean[1:n_admin2]*(1-cmat_admin2$urb_frac) + admin2_strata_mean[n_admin2 + 1:n_admin2]*cmat_admin2$urb_frac
-  # 
-  # sig2_R <- exp(gamma %*% t(var_model_matrix) + as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2)))
-  # sig2 <- c(sig2_R, exp(kappa_var)*sig2_R)
-  # 
-  # # setting 1/2
-  # sim_pop_long[, value := admin2_strata_mean[admin2_strata] + rnorm(.N,0,sqrt(sig2[admin2_strata]))]
-  
-  #setting 3
- #  sim_pop_long[, value := admin2_strata_mean[admin2_strata] + s[admin2_strata]*rt(.N,df_t)]
 
   # PPS sampling of clusters
   cluster_sample_ids <- unlist(sapply(unique(cluster_frame$strata),function(i){

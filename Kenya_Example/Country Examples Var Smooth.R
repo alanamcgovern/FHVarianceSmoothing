@@ -7,8 +7,11 @@ library(tidyverse)
 library(INLA)
 #library(igraph)
 library(ggpubr)
+library(ggpattern)
 library(cmdstanr)
 library(expm)
+library(patchwork)
+library(scico)
 source("/Users/alanamcgovern/Desktop/Research/my_helpers.R")
 
 ## I like Kenya the best from what I see here (least shrinkage of the mean)
@@ -148,7 +151,7 @@ clean_map_theme + geom_sf(data=poly.adm1,lwd=0.5,fill='transparent') +  geom_sf(
   guides(color = guide_legend(override.aes = list(size = 2)))
 
 # load covariates (country specific) ----------------
-setwd('/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Kenya_Example')
+setwd('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Kenya_Example')
 
 ur_weights_adm1 <- readRDS('Kenya_2022_admin1_u5_ur_weights.rds')
 ur_weights_adm2 <- readRDS('Kenya_2022_admin2_u5_ur_weights.rds')
@@ -218,7 +221,7 @@ admin2.dir <- admin2.dir[order(admin2.dir$admin2),]
 
 
 admin2.dir.stable <- admin2.dir
-admin2.dir.stable$variance <- ifelse(admin2.dir.stable$variance < 1e-10,NA,admin2.dir.stable$variance)
+admin2.dir.stable$variance <- ifelse(admin2.dir.stable$variance < 1e-5,NA,admin2.dir.stable$variance)
 admin2.dir.stable$mean <- ifelse(is.na(admin2.dir.stable$variance),NA,admin2.dir.stable$mean)
 
 # setwd("/Users/alanamcgovern/Desktop/Research/Project 2/FH Variance")
@@ -226,26 +229,143 @@ admin2.dir.stable$mean <- ifelse(is.na(admin2.dir.stable$variance),NA,admin2.dir
 # save(admin2.dir,file = paste0(country,'_',var_t,'_admin2_weighted_estimates.rda'))
 
 
-# standard FH ----------
+# descriptive plots ---------
+
+# distribution of cluster sizes
+cluster_sizes <- dir.dat %>% group_by(admin1,admin2,v025,cluster) %>% summarise(n= n())
+
+par(mfrow=c(1,2),mar = c(5, 1, 4, 1),   # bottom, left, top, right
+    oma = c(0, 0, 0, 0))
+hist(cluster_sizes[cluster_sizes$v025==1,]$n,prob=T,
+     main = 'Urban clusters',ylab='',yaxt='n',xlab='sampled individuals')
+lines(1:50-0.5,dnbinom(1:50,size=8,mu=9),col='red',lwd=2)
+
+hist(cluster_sizes[cluster_sizes$v025==2,]$n,prob=T,
+     main = 'Rural clusters',ylab='',yaxt='n',xlab='sampled individuals')
+lines(1:50-0.5,dnbinom(1:50,size=4,mu=11),col='red',lwd=2)
+
+
+## number of clusters
+cluster_sizes <- dir.dat %>% group_by(admin1,admin2,v025,cluster) %>% summarise(n= n())
+
+admin1_sizes <- cluster_sizes %>% group_by(admin1) %>% summarise(m=n())
+admin2_sizes <- cluster_sizes %>% group_by(admin2) %>% summarise(m=n())
+
+lims = c(0,max(admin1_sizes$m))
+
+d1 <- clean_map_theme + geom_sf(data = merge(poly.adm1,admin1_sizes),aes(fill=m),color='grey20',lwd=0.25) + 
+  scale_fill_viridis_c(name='Number of sampled clusters',direction = -1,limits = c(0,max(admin1_sizes$m))) + 
+  theme(legend.position = 'bottom') +
+  ggtitle('First administrative areas')
+
+
+adm2_merge <- left_join(poly.adm2,admin2_sizes)
+adm2_merge[is.na(adm2_merge$m),]$m <- 0
+adm2_merge$low_clusters <- I(adm2_merge$m<5)
+
+d2 <- clean_map_theme + geom_sf(data = adm2_merge,aes(fill=m),color='grey20',lwd=0.25) + 
+  geom_sf(data = filter(adm2_merge,m==0),fill='grey70') + 
+  geom_sf_pattern(data = filter(adm2_merge,low_clusters==1),
+                  pattern_density=0.01,
+                  fill=NA,
+                  pattern = "stripe",    # stripe, crosshatch, or other patterns
+                  pattern_angle = 45,
+                  color = "black",       # color of hatch lines
+                  pattern_spacing = 0.01) +
+  scale_fill_viridis_c(name='Number of sampled clusters',direction = -1, limits = c(0,max(admin1_sizes$m))) + 
+  theme(legend.position = 'bottom')+
+  ggtitle('Second administrative areas')
+
+# 780 x 580
+ggarrange(plotlist = list(d1,d2),nrow=1,common.legend = T)
+
+## design-based estimates
+poly.adm2$admin2_mean <- admin2.dir.stable$mean[poly.adm2$admin2]
+poly.adm1$admin1_mean <- admin1.dir$mean[poly.adm1$admin1]
+
+lims <- range(admin1.dir$mean,admin2.dir.stable$mean,na.rm=T)
+
+m1 <- clean_map_theme + geom_sf(data=poly.adm1,aes(fill=admin1_mean),color='grey20',lwd=0.25) + 
+  ggtitle('First administrative areas') + 
+  scale_fill_viridis_c(name = 'Design-based mean estimate',limits=lims,direction = -1)
+
+
+m2 <- clean_map_theme + geom_sf(data=poly.adm2,aes(fill=admin2_mean),color='grey80',lwd=0.01) + 
+  geom_sf(fill = "transparent", size=1, color = "grey20", lwd=0.25, data = poly.adm2 %>% group_by(NAME_1) %>% summarise()) +
+  ggtitle('Second administrative areas') +
+  scale_fill_viridis_c(name = 'Design-based mean estimate',limits=lims,direction = -1)
+
+poly.adm2$v <- admin2.dir.stable$variance[poly.adm2$admin2]
+poly.adm1$v <- admin1.dir$variance[poly.adm1$admin1]
+
+lims <- range(admin1.dir$variance,admin2.dir.stable$variance,na.rm=T)
+
+v1 <- clean_map_theme + geom_sf(data=poly.adm1,aes(fill=v),color='grey20',lwd=0.25) + 
+  ggtitle('First administrative areas') + 
+  scale_fill_scico(name = 'Design-based variance estimate',limits=lims,direction = -1,
+                   palette = 'lajolla',
+                   trans='log',breaks=c(1e-3,2e-2,0.2))
+
+
+v2 <- clean_map_theme + geom_sf(data=poly.adm2,aes(fill=v),color='grey80',lwd=0.01) + 
+  geom_sf(fill = "transparent", size=1, color = "grey20", lwd=0.25, data = poly.adm2 %>% group_by(NAME_1) %>% summarise()) +
+  ggtitle('Second administrative areas') +
+  scale_fill_scico(name = 'Design-based variance estimate',limits=lims,direction = -1,
+                       palette = 'lajolla',
+                   trans='log',breaks=c(1e-3,2e-2,0.2))
+
+top_row <- (m1 | m2) + plot_layout(guides = "collect")
+bottom_row <- (v1 | v2) + plot_layout(guides = "collect")
+
+top_row / bottom_row &
+  theme(legend.position = "bottom")
+
+
+
+# get parameter calibration for simulations ----------
  
 hyperpc.iid = list(prec = list(prior = "pc.prec", param = c(1, 0.01)))
 hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
                     phi = list(prior = "pc", param = c(0.5, 0.5)))
  
- fh2.bym2.cov <- inla(mean ~ f(admin2,model='bym2',hyper=hyperpc.bym2,graph = admin2.mat,scale.model = T)+ urb_frac + 
-                    density_log+ nt_lights_log+ tthc_log+ 
-                      precip+ temp+ elev,
-             family = "gaussian",
-             quantiles = c(0.05,0.95),
-             data = admin2.dir.stable,
-             scale = 1/admin2.dir.stable$variance,
-             control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
-             control.compute = list(config = TRUE))
+fh2.bym2 <- inla(mean ~ f(admin2,model='bym2',hyper=hyperpc.bym2,graph = admin2.mat,scale.model = T)+ urb_frac,
+                 family = "gaussian",
+                 quantiles = c(0.05,0.95),
+                 data = admin2.dir.stable,
+                 scale = 1/admin2.dir.stable$variance,
+                 control.family = list(hyper = list(prec = list(initial = log(1), fixed = TRUE))),
+                 control.compute = list(config = TRUE))
  
- std.fit <- fh2.bym2.cov$summary.fitted.values
+ std.fit <- fh2.bym2$summary.fitted.values
  std.fit$admin2 <- 1:n_admin2
  
+# urban effect on mean
+dir.dat$urban <- ifelse(dir.dat$v025==2,0,dir.dat$v025)
+tmp <- merge(dir.dat[,c('admin1','admin1.char','admin2','admin2.char','cluster','urban','v005','value')],std.fit[,c('mean','admin2')])
  
+tmp %>% group_by(urban) %>% summarise(obs_mean = mean(value))
+tmp %>% group_by(urban,admin2) %>% summarise(obs_mean = mean(value)) %>% 
+   pivot_wider(id_cols=admin2,values_from = obs_mean,names_from=urban) %>% mutate(diff=`1`-`0`) %>% 
+   summarise(mean(diff,na.rm=T),var(diff,na.rm=T))
+ 
+# overall variance of residuals
+tmp %>% summarise(log_sig2 = log(var(mean-value)))
+tmp %>% group_by(urban) %>% summarise(log_sig2 = log(var(mean-value)))
+
+# urban effect on variance
+tmp %>% group_by(urban,admin2) %>% summarise(log_sig2 = log(var(mean-value))) %>% 
+  pivot_wider(id_cols=admin2,values_from = log_sig2,names_from=urban) %>% mutate(diff=`1`-`0`)%>% 
+  summarise(mean(diff,na.rm=T),var(diff,na.rm=T))
+
+unit.model <- inla(value ~ f(admin2,model='bym2',hyper=hyperpc.bym2,graph = admin2.mat,scale.model = T)+
+                     f(cluster,model='iid'),
+                   data = dir.dat)
+summary(unit.model)
+
+#estimate cluster correlation:
+(1/16.21)/(1/0.67 + 1/16.21)
+
+
 # Naive approximation -------
  mod <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/Project 2/FHVariance_Smoothing/Stan/NonStrat.stan")
  
@@ -332,7 +452,25 @@ hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
  
  ggarrange(plotlist = list(m1,m2),common.legend=T)
  
-## properties of the data ------
+## properties of the data (for simulation settings) ------
+ 
+# how many sampled per cluster?
+dir.dat %>% group_by(v025,cluster) %>% summarise(n = n()) %>% group_by(v025) %>% summarise(mean(n),var(n)) 
+ 
+cluster_sizes <- dir.dat %>% group_by(v025,cluster) %>% summarise(n = n())
+
+which.min(sapply(1:50,function(s){
+  sum((qnbinom(seq(0.1,0.9,0.1),mu=9,size=s) - quantile(cluster_sizes[cluster_sizes$v025==1,]$n,seq(0.1,0.9,0.1)))^2)
+}))
+hist(cluster_sizes[cluster_sizes$v025==1,]$n,prob=T)
+lines(1:50,dnbinom(1:50,mu=9,size=8),col='red',lwd=1)
+
+which.min(sapply(1:50,function(s){
+  sum((qnbinom(seq(0.1,0.9,0.1),mu=11,size=s) - quantile(cluster_sizes[cluster_sizes$v025==2,]$n,seq(0.1,0.9,0.1)))^2)
+}))
+hist(cluster_sizes[cluster_sizes$v025==2,]$n,prob=T)
+lines(dnbinom(0:50,mu=11,size=4),col='red',lwd=1)
+
 
 # are variances different between areas -- yes!
 dir.dat %>% group_by(admin1) %>% summarise(v = var(value)/n()) %>% ggplot() +geom_histogram(aes(v))

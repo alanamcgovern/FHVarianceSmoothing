@@ -7,6 +7,7 @@ suppressMessages({
   library(cmdstanr)
   library(Matrix)
   library(readr)
+  library(stringr)
 })
 
 args <- commandArgs(trailingOnly=TRUE)
@@ -29,6 +30,9 @@ for(f in folders){
   if(!dir.exists(paste0(f,'/Hyper'))){
     dir.create(paste0(f,'/Hyper'), recursive = TRUE)
   }
+  if(!dir.exists(paste0(f,'/Diagnostic'))){
+    dir.create(paste0(f,'/Diagnostic'), recursive = TRUE)
+  }
 }
 
 admin.key <- objects$admin.key
@@ -49,19 +53,22 @@ if(length(change_id)>0){
 
 # get input 
 data_areas <- which(!is.na(dir.dat$mean))
-Cons_naive <- df_naive <- v_hat_scaled_naive <- rep(NA,n_admin2)
+Cons_naive <- scale_naive <- df_naive <- v_hat_scaled_naive <- rep(NA,n_admin2)
 
 for(area in data_areas){
-  tmp <- sampled_clusters[[k]] %>% filter(admin1 == admin.key[admin.key$admin2 == area,]$admin1)
-  N <- c(sum(1-tmp$urban),sum(tmp$urban))
-  
+
   tmp_D <- sampled_clusters[[k]] %>% filter(admin2 == area)
   N_D <- c(sum(1-tmp_D$urban),sum(tmp_D$urban))
   
-  df_naive[area] <- pmax(1,sum(N_D) - sum(N_D>0))
-  v_hat_scaled_naive[area] <- dir.dat$variance[area]*pmax(1,sum(N_D) - sum(N_D>0))
-  Cons_naive[area] <- 1/sum(N_D)
+ # if(sum(N_D>0)==2){
+    df_naive[area] <- pmax(1,sum(N_D) - sum(N_D>0))
+    v_hat_scaled_naive[area] <- dir.dat$variance[area]*pmax(1,sum(N_D) - sum(N_D>0))
+    Cons_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n))
+    scale_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n)*pmax(1,sum(N_D) - sum(N_D>0)))
+ # }
 }
+
+data_areas <- which(!is.na(df_naive))
 
 data_list = list(m=n_admin2,
                        m_data=length(data_areas),
@@ -91,6 +98,7 @@ fit1 <- mod$sample(
   parallel_chains = 4,
   iter_warmup = 1000,
   iter_sampling = 1000,
+  adapt_delta = 0.99,
   show_messages = F,
   show_exceptions = F,
   refresh=0)
@@ -117,11 +125,36 @@ write.csv(data.frame(sim=k,
                      mean = colMeans(hyper_fit1)),
           file=paste0('Mod1/Hyper/Hyper_Result',k,'.csv'))
 
+params_fit1 <- data.frame(sim=k,
+                          model='Mod1',
+                          area = 1:n_admin2,
+                          scale = exp(colMeans(hyper_fit1)[str_detect(colnames(hyper_fit1),'log_sig2')])*scale_naive,
+                          df = df_naive)
+write.csv(params_fit1,
+          file=paste0('Mod1/Hyper/Chisq_params',k,'.csv'))
+
+# diagnostics
+summary_df <- fit1$summary()
+diag_df    <- fit1$diagnostic_summary()
+
+write.csv(data.frame(sim=k,
+                     model = 'Mod1',
+                     divergences = sum(diag_df$num_divergent),
+                     max_treedepth = sum(diag_df$num_max_treedepth),
+                     min_efbmi = min(diag_df$ebfmi),
+                     max_rhat = max(summary_df$rhat,na.rm=T),
+                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
+                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
+          file=paste0('Mod1/Diagnostic/Diag_Summary_',k,'.csv'))
+
+prob_params <- summary_df %>% filter((!is.na(rhat) & rhat > 1.01) | ess_bulk < 400 | ess_tail < 100)
+if(nrow(prob_params)>0){
+  write.csv(prob_params,file=paste0('Mod1/Diagnostic/Diag_detect_',k,'.csv'))
+}
+
 rm(fit1,theta_fit1,v_fit1,hyper_fit1)
 
-
-
-# use IID and no covariatesn (except urban/rural) -------
+# use IID and no covariates (except urban/rural) -------
 
 data_list$bym2_var <- 0
 data_list$p_var = 2
@@ -133,6 +166,7 @@ fit1 <- mod$sample(
   parallel_chains = 4,
   iter_warmup = 1000,
   iter_sampling = 1000,
+  adapt_delta = 0.99,
   show_messages = F,
   show_exceptions = F,
   refresh=0)
@@ -159,6 +193,35 @@ write.csv(data.frame(sim=k,
                      mean = colMeans(hyper_fit1)),
           file=paste0('Mod1a/Hyper/Hyper_Result',k,'.csv'))
 
+params_fit1 <- data.frame(sim=k,
+                          model='Mod1a',
+                          area = 1:n_admin2,
+                          scale = exp(colMeans(hyper_fit1)[str_detect(colnames(hyper_fit1),'log_sig2')])*scale_naive,
+                          df = df_naive)
+write.csv(params_fit1,
+          file=paste0('Mod1a/Hyper/Chisq_params',k,'.csv'))
+
+# diagnostics
+summary_df <- fit1$summary()
+diag_df    <- fit1$diagnostic_summary()
+
+write.csv(data.frame(sim=k,
+                     model = 'Mod1a',
+                     divergences = sum(diag_df$num_divergent),
+                     max_treedepth = sum(diag_df$num_max_treedepth),
+                     min_efbmi = min(diag_df$ebfmi),
+                     max_rhat = max(summary_df$rhat,na.rm=T),
+                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
+                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
+          file=paste0('Mod1a/Diagnostic/Diag_Summary_',k,'.csv'))
+
+prob_params <- summary_df %>% filter((!is.na(rhat) & rhat > 1.01) | ess_bulk < 400 | ess_tail < 100)
+if(nrow(prob_params)>0){
+  write.csv(prob_params,file=paste0('Mod1a/Diagnostic/Diag_detect_',k,'.csv'))
+}
+
+
 rm(fit1,theta_fit1,v_fit1,hyper_fit1)
+
 
 

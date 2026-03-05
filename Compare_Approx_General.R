@@ -1,6 +1,181 @@
 
+
 H <- 2
 strata_totals <- c(100*100,100*100)
+
+## new ----------
+set.seed(12626)
+for(setting in c('V1','V2','V3')){
+  
+  if(setting == 'V1'){
+    N <- c(5,5)
+    prob_D <- 1 # proportion in target domain
+  }else if(setting=='V2'){
+    N <- c(15,15)
+    prob_D <- 0.2
+  }else if(setting == 'V3'){
+    N <- c(2,5)
+    prob_D <- 1 # proportion in target domain
+  }else{ 
+    stop('error')
+  }
+  
+  dat <- data.frame(h = unlist(lapply(1:H,function(h){rep(h,N[h])})))
+  dat$D <- rbinom(nrow(dat),1,prob_D)
+  
+  dat$mu <- ifelse(dat$D==1 & dat$h==1,-1,
+                   ifelse(dat$D==1 & dat$h==2,1,2))
+  
+  mu_diff <- 2
+  #mu <- c(rep(-1,N[1]),rep(1,N[2]))
+  sig2_k <- 2
+  
+  if(setting %in% c('V1','V2')){
+    dat$n <- 10
+  }else if(setting %in% c('V3')){
+    dat$n <- rpois(nrow(dat),10)
+  }else{
+    stop('error')
+  }
+  
+  dat$wt <- strata_totals[dat$h]/(N[dat$h]*dat$n)/1e3
+  
+  S <- diag(1/dat$n)
+  
+  sig2_c <- sig2_k/mean(dat$n)
+  
+  # get quantities-----
+  
+  if(sum(1-dat$D)>0)
+    dat[dat$D==0,]$wt <- 0
+  omega <- dat$wt*dat$n
+  
+  B_comps <- lapply(1:H,function(h){
+    if(N[h]>0){
+      return(N[h]/(N[h]-1)*(diag(1,N[h]) - 1/N[h]*matrix(1,N[h],N[h])))
+    }
+  })
+  
+  which.not.null <- c(1:H)[!sapply(B_comps, is.null)]
+  B <- bdiag(B_comps[which.not.null])
+  W <- diag(omega)%*%(diag(1,sum(N)) - (rep(1,sum(N))%*%t(omega))/sum(omega))
+  M <- t(W)%*%B%*%W
+  
+  L <- chol(S)              # S = L' L
+  Li <- backsolve(L, diag(nrow(S)))  # L^{-1}
+  
+  # Form scale-free matrix A = S^{1/2} C S^{1/2}
+  A <- t(L) %*% M %*% L
+  
+  out <- eigen(A, symmetric = TRUE)
+  V <- Li %*% out$vectors
+  
+  keep_id <- which(out$values > 1e-10)
+  q <- out$values[keep_id]
+  r <- length(keep_id)
+  
+  V <- V[,keep_id]
+  nu <- t(V)%*%(dat$h-1)
+  
+  delta <- (nu*mu_diff)^2/sig2_k
+  
+  ## calculate exact -----
+  dist_exact <- replicate(2e4,{
+    sig2_k/(sum(omega)^2)*sum(q*sapply(1:r,function(i){rchisq(1,1,ncp =  delta[i])}))
+  })
+  
+  q_exact <- quantile(dist_exact,probs=seq(0.01,0.99,0.01))
+  
+  ## compare to Satterthwhaite -----
+  
+  Q1 <- sum(q*(1+delta))
+  Q2 <- sum(q^2*(1+2*delta))
+  
+  scale_satt <- sig2_k/sum(omega)^2*Q2/Q1
+  df_satt <- Q1^2/Q2
+  
+  dist_satt <- scale_satt*rchisq(2e4,df_satt)
+  q_satt <- quantile(dist_satt,seq(0.01,0.99,0.01))
+  
+  mean_satt <- scale_satt*df_satt
+  var_satt <- scale_satt^2*2*df_satt
+  skew_satt <- sqrt(8/df_satt)
+  
+  ## compare to debiased Satterthwhaite -----
+  
+  scale_satt_debias <- as.numeric(sig2_k/sum(omega)^2*(t(omega)%*%S%*%omega)*Q2/Q1^2)
+  mean_satt_debias <- scale_satt_debias*df_satt
+  var_satt_debias <- scale_satt_debias^2*2*df_satt
+  
+  dist_satt_debias <- scale_satt_debias*rchisq(2e4,df_satt)
+  q_satt_debias <- quantile(dist_satt_debias,seq(0.01,0.99,0.01))
+  
+  
+  ## compare to naive -----
+  
+  df_naive <- sum(dat$D) - length(unique(dat[dat$D==1,]$h))
+  scale_naive <- sig2_c/(sum(dat$D)*df_naive)
+  dist_naive <- sig2_c/(sum(dat$D)*df_naive)*rchisq(2e4,df_naive)
+  
+  q_naive <- quantile(dist_naive,probs=seq(0.01,0.99,0.01))
+  
+  mean_naive <- scale_naive*df_naive
+  var_naive <- scale_naive^2*2*df_naive
+  skew_naive <- sqrt(8/df_naive)
+  
+  ## plot -----
+  quants <- data.frame(exact = q_exact,
+                       Naive = q_naive,
+                       Satterthwhaite = q_satt,
+                       Debiased_Satterthwhaite = q_satt_debias) %>%
+    pivot_longer(
+      cols = c(Naive, Satterthwhaite,Debiased_Satterthwhaite),
+      names_to = "approx",
+      values_to = "value"
+    )
+  quants[quants$approx=='Debiased_Satterthwhaite',]$approx <- 'Debiased Satterthwhaite'
+  
+  params <- data.frame(
+    approx = c("Naive", "Satterthwhaite","Debiased Satterthwhaite"),
+    label  = c(paste0('scale = ',round(scale_naive,5),'<br> df = ',df_naive,'<br> mean = ',round(mean_naive,3),'<br> var = ',round(var_naive,6)), 
+               paste0('scale = ',round(scale_satt,5),'<br> df = ',round(df_satt,2),'<br> mean = ',round(mean_satt,3),'<br> var = ',round(var_satt,6)),
+               paste0('scale = ',round(scale_satt_debias,5),'<br> df = ',round(df_satt,2),'<br> mean = ',round(mean_satt_debias,3),'<br> var = ',round(var_satt_debias,6)))
+  )
+  
+  lims <- range(quants$exact,quants$value)
+  
+  g_tmp <- ggplot(quants, aes(x = exact, y = value)) +
+    geom_point(size=0.75) + geom_abline(intercept = 0,slope=1,lwd=0.5,col='gray40') +
+    facet_wrap(~ factor(approx,
+                        levels = c("Naive", "Satterthwhaite","Debiased Satterthwhaite")), 
+               ncol = 3) +
+    xlim(lims) + ylim(lims) +
+    ggtext::geom_richtext(
+      data = params,
+      size=3,
+      aes(label = label),
+      inherit.aes = FALSE,
+      x = -Inf, y = Inf,
+      hjust = -0.05, 
+      vjust = 1.1
+    ) + theme_bw() + theme(strip.text = element_text(size=12)) +
+    labs(x = "Exact", y = 'Approximation') 
+  
+  if(setting == 'V1'){
+    g0 <- g_tmp + ggtitle('A. All design assumptions met')
+  }else if(setting=='V2'){
+    g1 <- g_tmp + ggtitle('B. Unplanned domain')
+  }else if(setting=='V3'){
+    g2 <- g_tmp + ggtitle('C. Unequal sample size')
+  }else{stop('error')
+  }
+  
+}
+
+ggarrange(plotlist = list(g0,g1,g2),nrow=3)
+
+
+
 
 ## correct specification and estimation -----
 N <- c(5,5)
@@ -13,7 +188,7 @@ dat <- data.frame(h = unlist(lapply(1:H,function(h){rep(h,N[h])})),
                   n = rep(10,sum(N)))
 dat$wt <- strata_totals[dat$h]/(N[dat$h]*dat$n)/1e3
 
-dat <- as.data.table(dat)
+#dat <- as.data.table(dat)
 
 S <- diag(1/dat$n)
 sig2_c <- sig2_k/mean(dat$n)
@@ -60,35 +235,46 @@ q_exact <- quantile(dist_exact,probs=seq(0.01,0.99,0.01))
 ## compare to naive 
 
 df_naive <- sum(dat$D) - length(unique(dat[dat$D==1,]$h))
-dist_naive <- sig2_c/(sum(dat$D)*df_naive)*rchisq(2e4,df_naive)
+scale_naive <- sig2_c/(sum(dat$D)*df_naive)
+dist_naive <- scale_naive*rchisq(2e4,df_naive)
 
 q_naive <- quantile(dist_naive,probs=seq(0.01,0.99,0.01))
 
-## compare to satterwhaite 
+## compare to Satterthwhaite 
 
 Q1 <- sum(q*(1+delta))
 Q2 <- sum(q^2*(1+2*delta))
 
-dist_satt <- sig2_k/(sum(omega)^2)*Q2/Q1*rchisq(2e4,Q1^2/Q2)
+scale_satt <- sig2_k/(sum(omega)^2)*Q2/Q1
+df_satt <- Q1^2/Q2
+dist_satt <- scale_satt*rchisq(2e4,df_satt)
 q_satt <- quantile(dist_satt,seq(0.01,0.99,0.01))
+
+## satt debiased
+scale_satt_debias <- as.numeric(sig2_k/(sum(omega)^2)*(t(omega) %*%S %*% omega)*Q2/Q1^2)
+dist_satt_debias <- scale_satt_debias*rchisq(2e4,df_satt)
+q_satt_debias <- quantile(dist_satt_debias,seq(0.01,0.99,0.01))
 
 ## plot 
 quants <- data.frame(exact = q_exact,
                      Naive = q_naive,
-                     Satterwhaite = q_satt) %>%
+                     Satterthwhaite = q_satt,
+                     Debiased_Satterthwhaite = q_satt_debias) %>%
   pivot_longer(
-    cols = c(Naive, Satterwhaite),
+    cols = c(Naive, Satterthwhaite,Debiased_Satterthwhaite),
     names_to = "approx",
     values_to = "value"
   )
 
 params <- data.frame(
-  approx = c("Naive", "Satterwhaite"),
-  label  = c(paste0('scale = ',round(sig2_c/(sum(dat$D)*df_naive),4),'\n df = ',df_naive), 
-             paste0('scale = ',round(sig2_k/(sum(omega)^2)*Q2/Q1,4),'\n df = ',round(Q1^2/Q2,2)))
+  approx = c("Naive", "Satterthwhaite","Debiased_Satterthwhaite"),
+  label  = c(paste0('scale = ',round(scale_naive,4),'\n df = ',df_naive), 
+             paste0('scale = ',round(scale_satt,4),'\n df = ',round(df_satt,2)),
+             paste0('scale = ',round(scale_satt_debias,4),'\n df = ',round(df_satt,2)))
 )
-
+lims <- range(quants$exact,quants$value)
 g <- ggplot(quants, aes(x = exact, y = value)) +
+  xlim(lims) + ylim(lims) +
   geom_point(size=0.75) + geom_abline(intercept = 0,slope=1,lwd=0.5,col='gray40') +
   facet_wrap(~ approx, ncol = 2) +
   geom_label(
@@ -103,7 +289,7 @@ g <- ggplot(quants, aes(x = exact, y = value)) +
 print(g)
 
 ## misspecification -----
-
+set.seed(12626)
 for(setting in c('V1','V2','V3','V4')){
 
 if(setting=='V1'){
@@ -123,11 +309,11 @@ if(setting=='V1'){
 }
  
 dat <- data.frame(h = unlist(lapply(1:H,function(h){rep(h,N[h])})))
-dat <- as.data.table(dat)
 dat$D <- rbinom(nrow(dat),1,prob_D)
 
 dat$mu <- ifelse(dat$D==1 & dat$h==1,-1,
                  ifelse(dat$D==1 & dat$h==2,1,2))
+
 mu_diff <- 2
 #mu <- c(rep(-1,N[1]),rep(1,N[2]))
 sig2_k <- 2
@@ -172,8 +358,9 @@ A <- t(L) %*% M %*% L
 out <- eigen(A, symmetric = TRUE)
 V <- Li %*% out$vectors
 
-keep_id <- which(out$values > tol)
+keep_id <- which(out$values > 1e-10)
 q <- out$values[keep_id]
+r <- length(keep_id)
 
 V <- V[,keep_id]
 nu <- t(V)%*%(dat$h-1)
@@ -199,25 +386,36 @@ dist_emp <- replicate(2e4,{
 q_emp <- quantile(dist_emp,probs=seq(0.01,0.99,0.01))
 
 ## calculate exact -----
-# dist_exact <- replicate(2e4,{
-#   sig2_k/(sum(omega)^2)*sum(q*sapply(1:r,function(i){rchisq(1,1,ncp =  delta[i])}))
-# })
-# 
-# q_exact <- quantile(dist_exact,probs=seq(0.01,0.99,0.01))
+dist_exact <- replicate(2e4,{
+  sig2_k/(sum(omega)^2)*sum(q*sapply(1:r,function(i){rchisq(1,1,ncp =  delta[i])}))
+})
 
-## compare to satterwhaite -----
+q_exact <- quantile(dist_exact,probs=seq(0.01,0.99,0.01))
+
+## compare to Satterthwhaite -----
 
 Q1 <- sum(q*(1+delta))
 Q2 <- sum(q^2*(1+2*delta))
 
-dist_satt <- sig2_k/sum(omega)^2*Q2/Q1*rchisq(2e4,Q1^2/Q2)
-q_satt <- quantile(dist_satt,seq(0.01,0.99,0.01))
 scale_satt <- sig2_k/sum(omega)^2*Q2/Q1
 df_satt <- Q1^2/Q2
+
+dist_satt <- scale_satt*rchisq(2e4,df_satt)
+q_satt <- quantile(dist_satt,seq(0.01,0.99,0.01))
 
 mean_satt <- scale_satt*df_satt
 var_satt <- scale_satt^2*2*df_satt
 skew_satt <- sqrt(8/df_satt)
+
+## compare to debiased Satterthwhaite -----
+
+scale_satt_debias <- as.numeric(sig2_k/sum(omega)^2*(t(omega)%*%S%*%omega)*Q2/Q1^2)
+mean_satt_debias <- scale_satt_debias*df_satt
+var_satt_debias <- scale_satt_debias^2*2*df_satt
+
+dist_satt_debias <- scale_satt_debias*rchisq(2e4,df_satt)
+q_satt_debias <- quantile(dist_satt_debias,seq(0.01,0.99,0.01))
+
 
 ## compare to naive -----
 
@@ -232,24 +430,29 @@ var_naive <- scale_naive^2*2*df_naive
 skew_naive <- sqrt(8/df_naive)
 
 ## plot -----
-quants <- data.frame(exact = q_emp,
+quants <- data.frame(exact = q_exact,
                      Naive = q_naive,
-                     Satterwhaite = q_satt) %>%
+                     Satterthwhaite = q_satt,
+                     Debiased_Satterthwhaite = q_satt_debias) %>%
   pivot_longer(
-    cols = c(Naive, Satterwhaite),
+    cols = c(Naive, Satterthwhaite,Debiased_Satterthwhaite),
     names_to = "approx",
     values_to = "value"
   )
 
 params <- data.frame(
-  approx = c("Naive", "Satterwhaite"),
+  approx = c("Naive", "Satterthwhaite","Debiased_Satterthwhaite"),
   label  = c(paste0('scale = ',round(scale_naive,5),'<br> df = ',df_naive,'<br> mean = ',round(mean_naive,3),'<br> var = ',round(var_naive,6)), 
-             paste0('scale = ',round(scale_satt,5),'<br> df = ',round(df_satt,2),'<br> mean = ',round(mean_satt,3),'<br> var = ',round(var_satt,6)))
+             paste0('scale = ',round(scale_satt,5),'<br> df = ',round(df_satt,2),'<br> mean = ',round(mean_satt,3),'<br> var = ',round(var_satt,6)),
+             paste0('scale = ',round(scale_satt_debias,5),'<br> df = ',round(df_satt,2),'<br> mean = ',round(mean_satt_debias,3),'<br> var = ',round(var_satt_debias,6)))
 )
+
+lims <- range(quants$exact,quants$value)
 
 g_tmp <- ggplot(quants, aes(x = exact, y = value)) +
   geom_point(size=0.75) + geom_abline(intercept = 0,slope=1,lwd=0.5,col='gray40') +
-  facet_wrap(~ approx, ncol = 2) +
+  facet_wrap(~ approx, ncol = 3) +
+  xlim(lims) + ylim(lims) +
   ggtext::geom_richtext(
     data = params,
     size=3,
@@ -278,7 +481,7 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
 
 
 ## wrong mean estimation ------
-
+set.seed(12726)
   N <- c(15,20)
   prob_D <- 0.2 # proportion in target domain
   
@@ -336,7 +539,7 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
   
   q_exact <- quantile(dist_exact,probs=seq(0.01,0.99,0.01))
   
-  #satterwhaite 
+  #Satterthwhaite 
   Q1 <- sum(q*(1+delta))
   Q2 <- sum(q^2*(1+2*delta))
   
@@ -375,7 +578,7 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
   
   delta <- (t(u)%*%mu)^2/sig2_k
   
-  ## compare to satterwhaite -----
+  ## compare to Satterthwhaite -----
   
   Q1 <- sum(q*(1+delta))
   Q2 <- sum(q^2*(1+2*delta))
@@ -416,9 +619,12 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
     Satt_M1 = "Satterthwaite~(hat(theta)[1]==-0.5~','~hat(theta)[2]==0.5)",
     Satt_M2 = "Satterthwaite~(hat(theta)[1]==-1.5~','~hat(theta)[2]==1.5)")
   
+  lims <- range(quants$exact,quants$value)
+  
   g <- ggplot(quants, aes(x = exact, y = value)) +
     geom_point(size=0.75) + geom_abline(intercept = 0,slope=1,lwd=0.5,col='gray40') +
     facet_wrap(~ approx, ncol = 2,labeller = as_labeller(setting_labs,label_parsed)) +
+    xlab(lims) + ylab(lims) +
     ggtext::geom_richtext(
       data = params,
       size=3,
@@ -434,7 +640,7 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
 
 
 ## wrong variance estimation ------
- 
+ set.seed(12526)
  N <- c(15,20)
  prob_D <- 0.2 # proportion in target domain
 
@@ -489,7 +695,7 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
  
  q_exact <- quantile(dist_exact,probs=seq(0.01,0.99,0.01))
  
- #satterwhaite 
+ #Satterthwhaite 
  Q1 <- sum(q*(1+delta))
  Q2 <- sum(q^2*(1+2*delta))
  
@@ -527,7 +733,7 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
    sig2_c <- sig2_k/10
    delta <- (t(u)%*%mu)^2/sig2_k
    
-   ## satterwhaite ----
+   ## Satterthwhaite ----
    
    Q1 <- sum(q*(1+delta))
    Q2 <- sum(q^2*(1+2*delta))
@@ -582,9 +788,11 @@ ggarrange(plotlist = list(g1,g2,g3,g4),nrow=4)
                    Satt_V2 = "Satterthwaite~(hat(sigma)^2==8)",
                    Satt_correct = "Satterthwaite~(hat(sigma)^2==2)")
 
+ lims <- range(quants$exact,quants$value)
  g <- ggplot(quants, aes(x = exact, y = value)) +
    geom_point(size=0.75) + geom_abline(intercept = 0,slope=1,lwd=0.5,col='gray40') +
    facet_wrap(~ approx, ncol = 3,labeller = as_labeller(setting_labs,label_parsed)) +
+   xlim(lims) + ylim(lims) +
    ggtext::geom_richtext(
      data = params,
      size=3,
