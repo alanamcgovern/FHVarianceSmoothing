@@ -209,9 +209,13 @@ cluster_frame[cluster_frame$urban==1,]$n <- rnbinom(sum(cluster_frame$urban==1),
 cluster_frame[cluster_frame$n==0,]$n <- 1
 cluster_frame$n <- pmin(cluster_frame$n,round(0.75*cluster_frame$N))
 
+## create listed sizes
+cluster_frame[,N_list:= round(rnorm(.N,0.85*N,0.2*N))]
+
 cluster_alloc <- left_join(cluster_alloc, sim_pop_long[,.N,by=strata],by='strata') %>% rename(strata_total=N)
-cluster_frame <- merge(cluster_frame,cluster_alloc,by=c('admin1','NAME_1','urban','admin1.char','strata')) %>% 
-  mutate(wt = strata_total/(EAs*n)/1e3) # inclusion probability of cluster
+cluster_frame <- merge(cluster_frame,cluster_alloc,by=c('admin1','NAME_1','urban','admin1.char','strata')) %>% group_by(strata) %>%
+  mutate(wt = strata_total/(EAs*n)/1e3,
+         wt_reenum = (N*sum(N_list))/(N_list*EAs*n)/1e3) # inclusion probability of cluster
 
 # get population urban rural percent for weights
 
@@ -271,15 +275,17 @@ var_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2))
 # setting 4: increase number of sampled clusters 5x
 # setting 5: within cluster correlation
 # setting 6: urban oversample
+# setting 7: reenumeration
 
-setting <- 3
+setting <- 7
 
+cluster_frame <- as.data.table(cluster_frame)
 if(setting == 4){
-  cluster_frame <- cluster_frame %>% mutate(pik = 5*EAs*N/strata_total)
-}else if(setting == 6){
-  cluster_frame <- cluster_frame %>% mutate(pik = 3*EAs*N/strata_total)
+  cluster_frame[, pik := 5*EAs*N/strata_total]
+}else if(setting == 7){
+  cluster_frame[, pik := EAs * N_list / sum(N_list), by = strata]
 }else{
-  cluster_frame <- cluster_frame %>% mutate(pik = EAs*N/strata_total)
+  cluster_frame[, pik := EAs*N/strata_total]
 }
 
 if(setting == 2){
@@ -339,7 +345,7 @@ for(k in 1:100){
   cluster_sample_ids <- unlist(sapply(unique(cluster_frame$strata),function(i){
     cluster_frame[cluster_frame$strata==i,]$cluster[UPsystematic(cluster_frame[cluster_frame$strata==i,]$pik)>=1]
   }))
-  cluster_sample <- cluster_frame[cluster_frame$cluster %in% cluster_sample_ids,c('cluster','n','wt')]
+  cluster_sample <- cluster_frame[cluster_frame$cluster %in% cluster_sample_ids,c('cluster','n','wt','wt_reenum')]
   
   sim_sample <- sim_pop_long[
     cluster_sample,                   # right table
@@ -349,14 +355,23 @@ for(k in 1:100){
   sim_sample[,n:=NULL]
   
   ## save info (weights and sample sizes) on sampled cluster for Satt approx
-  sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
+  if(setting ==7){
+    sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt_reenum))
+  }else{
+    sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
+  }
 
   # true_vals[[k]] <- list(sig2 = sig2,
   #                        admin2_mean = admin2_mean,
   #                        admin2_strata_mean = admin2_strata_mean)
 
-  my.svydesign <- survey::svydesign(ids = stats::formula("~cluster"),strata = ~strata,
-                                    weights = ~wt, data = sim_sample)
+  if(setting == 7){
+    my.svydesign <- survey::svydesign(ids = stats::formula("~cluster"),strata = ~strata,
+                                      weights = ~wt_reenum, data = sim_sample)
+  }else{
+    my.svydesign <- survey::svydesign(ids = stats::formula("~cluster"),strata = ~strata,
+                                      weights = ~wt, data = sim_sample) 
+  }
   
   x <- mapply(admin2.HT.withNA, which.area = 1:n_admin2)
   admin.dir <- data.frame(t(x))
