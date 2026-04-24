@@ -1,5 +1,5 @@
 ---
-title: "Implementation of Simple Variance Smoothing Fay-Herriot model"
+title: "Appendix H: Implementation of simple variance smoothing Fay-Herriot model"
 output: pdf_document
 ---
 
