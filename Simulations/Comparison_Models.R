@@ -16,7 +16,7 @@ source("/Users/alanamcgovern/Desktop/Research/my_helpers.R")
 
 setwd("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing")
 
-setting <- 1
+setting <- 7
 # load simulation objects -------------
 setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim",setting))
 

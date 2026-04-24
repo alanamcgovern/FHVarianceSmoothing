@@ -15,10 +15,29 @@ for(setting in 1:5){
   diag_full <- rbind(diag_full,tmp)
 }
 
+diag_full %>% filter(!(model %in% c('Mod4','Mod4a'))) %>% group_by(model) %>% summarise(sum(max_treedepth))
+
+diag_full %>% filter(!(model %in% c('Mod4','Mod4a'))) %>% filter(max_treedepth>0)
+
+diag_full %>% filter(!(model %in% c('Mod4','Mod4a'))) %>% group_by(model) %>% summarise(mean(max_rhat > 1.01))
+
+
 sum(diag_full$divergences)
 diag_full %>% filter(model %in% c('Mod1','Mod2','Mod1a','Mod2a')) %>% group_by(setting,model) %>% 
-  summarise(minb = min(bulk_ess),avgb = mean(bulk_ess),mint = min(tail_ess),avgt = mean(tail_ess)) %>% summarise(min(minb),min(avgb),min(mint),min(avgt))
+  summarise(minb = min(bulk_ess),avgb = mean(bulk_ess),mint = min(tail_ess),avgt = mean(tail_ess)) %>% 
+  summarise(min(minb),min(avgb),min(mint),min(avgt))
 
+diag_full%>% filter(model %in% c('Mod1','Mod2','Mod1a','Mod2a')) %>% ggplot() + 
+  geom_histogram(aes(bulk_ess)) +
+  facet_wrap(~model)
+
+diag_full%>% filter(model %in% c('Mod1','Mod2','Mod1a','Mod2a')) %>% ggplot() + 
+  geom_histogram(aes(tail_ess)) +
+  facet_wrap(~model)
+
+diag_full%>% filter(model %in% c('Mod1','Mod2','Mod1a','Mod2a')) %>% ggplot() + 
+  geom_histogram(aes(min_efbmi)) +
+  facet_wrap(~model)
 
 ########### SUMMARY OF SAMPLES -----------
 setting <- c(1,4)[2]
@@ -52,16 +71,16 @@ sample_info %>% group_by(sim) %>% summarise(x = sum(m_u+m_r < 5)) %>% summarise(
 ########## ACCURACY OF APPROXIMATE DISTRIBUTIONS ----------------
 
 dist_metrics_full <- NULL
-for(setting in 1:5){
+for(setting in c(1:5)){
   setwd(paste0('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim',setting))
-  load('approx_dist_metrics.rda')
+  load('approx_dist_metrics.rda') # from Comparison_Models.R
   dist_metrics_full <- rbind(dist_metrics_full,dist_metrics)
 }
 
-model_labs <- c(n = "Naive", sw = "SASW")
+model_labs <- c(n = "Simple", sw = "SASW")
 model_colors <- c("n" = "#1f78b4", "sw" = "#6a3d9a")
 
-setting_key <- data.frame(setting = 1:5,
+setting_key <- data.frame(setting = c(1:5),
                           setting_labels = c('1: correctly specified',
                                              '2: varying urban effects',
                                              '3: t-distributed data',
@@ -126,7 +145,7 @@ ggarrange(plotlist = list(m1,m3), nrow=2, common.legend = T, legend='bottom')
 ############ MODEL PERFORMANCE -------------------------------
 
 df_metrics <- var.results <- sig2.results <- NULL
-for(setting in c(1:6)){
+for(setting in c(1:7)){
   setwd(paste0('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim',setting))
   
   load(file=paste0('params.rda'))
@@ -206,17 +225,19 @@ for(setting in c(1:6)){
 # load('correct_chisq_params.rda')
 # chisq.params <- left_join(chisq.params,chisq_correct_params,by=c('sim','area'))
 
-setting_key <- data.frame(setting = 1:5,
+setting_key <- data.frame(setting = c(1:5,7),
                           setting_labels = c('1: correctly specified',
                                              '2: varying urban effects',
                                              '3: t-distributed data',
                                              '1a: 5x sampled clusters',
-                                             '4: within cluster correlation'))
+                                             '4: within cluster correlation',
+                                             '5: re-enumeration'))
 setting_levels <- c('1: correctly specified',
                     '1a: 5x sampled clusters',
                     '2: varying urban effects',
                     '3: t-distributed data',
-                    '4: within cluster correlation')
+                    '4: within cluster correlation',
+                    '5: re-enumeration')
 
 df_metrics <- merge(df_metrics,setting_key)
 var.results <- merge(var.results,setting_key)
@@ -224,10 +245,10 @@ sig2.results <- merge(sig2.results,setting_key)
 
 
 model_labs <- c(
-  Mod1 = "Naive-struct",
+  Mod1 = "Simple-struct",
   Mod2 = "SASW-struct",
   Mod4 = "Debias-SASW-struct",
-  Mod1a = "Naive-unstruct",
+  Mod1a = "Simple-unstruct",
   Mod2a = "SASW-unstruct",
   Mod4a = "Debias-SASW-unstruct",
   oracle = "Oracle",
@@ -272,35 +293,27 @@ sig2.results <- sig2.results %>% filter(setting!=6)
 tmp <- sig2.results %>% mutate(var_model = cons*true_value) %>% 
   dplyr::select(setting_labels,sim,area,model,var_model)
 
-# compare model to design variance --- both model variances underestimate the design variance, naive underestimates it more
-merge(var.results,tmp) %>% filter(model %in% c('Mod1','Mod2')) %>% group_by(setting_labels,model,area) %>% 
-  summarise(v_ratio=median(var_model/true_var)) %>% 
-  ggplot(aes(model,v_ratio)) +
+# compare theoretical to true design variance (Fig 3) ------
+# 940 x 350
+merge(tmp,var.results) %>% filter(setting %in% 1:5,(model %in% c('Mod1','Mod2'))) %>% 
+  group_by(setting_labels,model,area) %>% 
+  summarise(val = mean(var_model/true_var))  %>% 
+  ggplot(aes(model,val)) +
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
-  scale_fill_manual(name="Model",values = model_colors,labels=c(Mod1 = 'Naive',Mod2 = 'SASW')) + 
+  scale_fill_manual(name="Model",values = model_colors,labels=c(
+    Mod1 = "Simple",
+    Mod2 = "SASW")) + 
   geom_hline(yintercept = 1,col='red',lty=5) +
   facet_wrap(~factor(setting_labels,
-                     levels = setting_levels),nrow=1) +  
+                     levels = setting_levels),nrow=1) +
   scale_y_continuous(trans='log',breaks = c(0.1,0.25,0.5,1,2.5,5,10)) +
-  labs(x=NULL,y=NULL) + common_theme# + 
-  ggtitle('Accuracy of theoretical design variance under the model (compared to true design variance)')
+  labs(x=NULL,y=NULL)+ common_theme
 
-# compare estimated variance to model variance -- all overestimate the model variance (on average), naive slightly higher
-# merge(var.results,tmp) %>% group_by(setting_labels,model,area) %>% summarise(v_ratio=median(mean/var_model)) %>% 
-#   ggplot(aes(model,v_ratio)) +
-#   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-#   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
-#   scale_fill_manual(name="Model",values = model_colors,labels=model_labs) + 
-#   geom_hline(yintercept = 1,col='red',lty=5) +
-#   facet_wrap(~factor(setting_labels,
-#                      levels = setting_levels),nrow=1) +
-#   scale_y_continuous(trans='log',breaks = c(0.1,0.25,0.5,1,2.5,5,10)) +
-#   labs(x=NULL,y=NULL)+ common_theme +
-#   ggtitle('Estimation of design variance under the model (compared to theoretical design variance under the model)')
+# compare estiamted to true design variance (Fig 4) ---- 
 
-
-v1 <- sig2.results %>% filter(!(model %in% c('Mod4','Mod4a'))) %>% group_by(setting_labels,model,area) %>% summarise(val = mean(mean/true_value))  %>% 
+v1 <- sig2.results %>% filter(setting %in% 1:5,!(model %in% c('Mod4','Mod4a'))) %>% group_by(setting_labels,model,area) %>% 
+  summarise(val = mean(mean/true_value))  %>% 
   ggplot(aes(model,val)) +
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
@@ -311,10 +324,9 @@ v1 <- sig2.results %>% filter(!(model %in% c('Mod4','Mod4a'))) %>% group_by(sett
   scale_y_continuous(trans='log',breaks = c(0.1,0.25,0.5,1,2.5,5,10)) +
   labs(x=NULL,y=NULL)+ common_theme +
   theme(legend.position = 'none') +
-  ggtitle('A. Within-stratum variance')
+  ggtitle('A. Within-stratum superpopulation variance')
 
-# compare estimated variance to design variance -- balances out so that design variance is overestimated but not as much as model variance is overestimated (because model variance itself is an underestimate)
-v2 <-  var.results %>% filter(!(model %in% c('Mod4','Mod4a')) )%>% group_by(setting_labels,model,area,true_var) %>% 
+v2 <-  var.results %>% filter(setting %in% 1:5,!(model %in% c('Mod4','Mod4a')) )%>% group_by(setting_labels,model,area,true_var) %>% 
    summarise(v_ratio=mean(mean/true_var)) %>% ggplot(aes(model,v_ratio)) +
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
@@ -329,9 +341,9 @@ v2 <-  var.results %>% filter(!(model %in% c('Mod4','Mod4a')) )%>% group_by(sett
 # 830 x 515
 ggarrange(plotlist = list(v1,v2),nrow = 2,heights = c(1,1.25))
 
- df_metrics <- df_metrics %>% filter(setting!=6)
+# compare mean and interval estimates (Fig 5) ---------
 
-d1 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,rmse)) + ggtitle('A. RMSE')+ 
+d1 <- df_metrics%>% filter(setting %in% 1:5,!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,rmse)) + ggtitle('A. RMSE')+ 
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
   scale_y_continuous(trans='log',breaks=c(0.05,0.1,0.25,0.5,1)) +
@@ -342,7 +354,7 @@ d1 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model
   theme(plot.title = element_text(size=12),axis.text.x = element_blank(),
         axis.text.y = element_text(size=6))
 
-d2 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,100*cov)) +  
+d2 <- df_metrics%>% filter(setting %in% 1:5,!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,100*cov)) +  
   ggtitle('B. Coverage of 90% credible intervals (clipped at 50%)') + 
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
@@ -355,7 +367,7 @@ d2 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model
   theme(plot.title = element_text(size=12),axis.text.x =  element_blank(),
         axis.text.y = element_text(size=6))
 
-d3 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,mean_width)) + ggtitle('C. Average 90% credible interval width')+
+d3 <- df_metrics%>% filter(setting %in% 1:5,!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,mean_width)) + ggtitle('C. Average 90% credible interval width')+
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
   labs(x=NULL,y=NULL) + theme_bw() +
@@ -366,7 +378,7 @@ d3 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model
     axis.text.x = element_blank(),
         axis.text.y = element_text(size=6))
 
-d4 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,i.score)) + ggtitle('D. Average interval score for 90% credible intervals') + 
+d4 <- df_metrics%>% filter(setting %in% 1:5,!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,i.score)) + ggtitle('D. Average interval score for 90% credible intervals') + 
   geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
   stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
   scale_y_continuous(trans='log',breaks = c(0.25,0.5,1,2,4)) +
@@ -381,140 +393,64 @@ d4 <- df_metrics%>% filter(!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model
 ggarrange(plotlist = list(d1,d2,d3,d4),nrow=4,common.legend = T,legend = "bottom")
 
 
-#pdf(paste0('Sim',setting,' Plots.pdf'))
+## plots for appendix -----------
+setting_key <- data.frame(setting = c(1,7),
+                          setting_labels_new = c('1: listed cluster sizes are correct',
+                                             '5: cluster sizes are re-enumerated'))
+setting_levels <- c('1: listed cluster sizes are correct',
+                    '5: cluster sizes are re-enumerated')
 
-### scratch -----
-
-
-var.results %>% filter(model=='Mod4') %>% ggplot(aes(true_var,mean)) + geom_point()
-
-var.results %>% filter(model=='Mod4') %>% summarise(mean(mean/true_var >2))
-
-var.results %>% filter(model=='Mod4') %>% summarise(mean(mean/true_var),median(mean/true_var))
+df_metrics <- merge(df_metrics,setting_key)
 
 
+a1 <- df_metrics%>% filter(setting %in% c(1,7),!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,rmse)) + ggtitle('A. RMSE')+ 
+  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+  stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
+  scale_y_continuous(trans='log',breaks=c(0.05,0.1,0.25,0.5,1)) +
+  scale_fill_manual(name="Model",values = model_colors,labels=model_labs) + 
+  labs(x=NULL,y=NULL) + theme_bw() +
+  facet_wrap(~factor(setting_labels_new,
+                     levels = setting_levels),nrow=1) + 
+  theme(plot.title = element_text(size=12),axis.text.x = element_blank(),
+        axis.text.y = element_text(size=6))
 
+a2 <- df_metrics%>% filter(setting %in% c(1,7),!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,100*cov)) +  
+  ggtitle('B. Coverage of 90% credible intervals (clipped at 50%)') + 
+  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+  stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
+  geom_hline(yintercept = 90,col='red',lty=5) +
+  scale_fill_manual(name="Model",values = model_colors,labels=model_labs) + 
+  labs(x=NULL,y=NULL) + theme_bw() +
+  ylim(c(50,100)) +
+  facet_wrap(~factor(setting_labels_new,
+                     levels = setting_levels),nrow=1) + 
+  theme(plot.title = element_text(size=12),axis.text.x =  element_blank(),
+        axis.text.y = element_text(size=6))
 
-# compare estimates across models
+a3 <- df_metrics%>% filter(setting %in% c(1,7),!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,mean_width)) + ggtitle('C. Average 90% credible interval width')+
+  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+  stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
+  labs(x=NULL,y=NULL) + theme_bw() +
+  scale_fill_manual(name="Model",values = model_colors,labels=model_labs) + 
+  facet_wrap(~factor(setting_labels_new,
+                     levels = setting_levels),nrow=1) + 
+  theme(plot.title = element_text(size=12),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size=6))
 
-# mean
-results %>% group_by(model,area,true_mean) %>% summarise(val = mean(mean)) %>%
-  ggplot()+ geom_point(aes(true_mean,val)) + facet_wrap(~ model,nrow=3,labeller = as_labeller(model_labs)) +
-  geom_abline(intercept = 0,slope = 1)
+a4 <- df_metrics%>% filter(setting %in% c(1,7),!(model %in% c('Mod4','Mod4a'))) %>% ggplot(aes(model,i.score)) + ggtitle('D. Average interval score for 90% credible intervals') + 
+  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+  stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
+  scale_y_continuous(trans='log',breaks = c(0.25,0.5,1,2,4)) +
+  scale_fill_manual(name="Model",values = model_colors,labels=model_labs) + 
+  labs(x=NULL,y=NULL)+ theme_bw() +
+  facet_wrap(~factor(setting_labels_new,
+                     levels = setting_levels),nrow=1) + 
+  theme(plot.title = element_text(size=12),axis.text.x =element_blank(),
+        axis.text.y = element_text(size=6))
 
-
-logsig2.results %>% group_by(model,area,true_value) %>% summarise(est=mean(mean)) %>% ggplot() +
-  geom_point(aes(true_value,est)) + ylab('Average estimate') + facet_wrap(~model,labeller = as_labeller(model_labs)) + 
-  geom_abline(intercept = 0,slope=1) + ggtitle('Estimate of log(sig2)')
-
-chisq.params %>% filter(model %in% c('Mod1','Mod2')) %>% dplyr::select(sim,area,model,df) %>% 
-  pivot_wider(id_cols = sim:area,names_from = model,values_from = df) %>%
-  ggplot() + geom_point(aes(Mod1,Mod2)) + geom_abline(intercept = 0,slope = 1,col='red')
-
-chisq.params %>% mutate(t_mean = scale*df) %>% filter(model %in% c('Mod1','Mod2')) %>% dplyr::select(sim,area,model,t_mean) %>% 
-  pivot_wider(id_cols = sim:area,names_from = model,values_from = t_mean) %>%
-  ggplot() + geom_point(aes(Mod1,Mod2),size=0.5) + geom_abline(intercept = 0,slope = 1,col='red')
-
-chisq.params %>% group_by(model,area,dof_correct) %>% summarise(val = mean(df)) %>%
-  ggplot()+ geom_point(aes(dof_correct,val),size=0.5) + facet_wrap(~ model,nrow=3,labeller = as_labeller(model_labs)) +
-  geom_abline(intercept = 0,slope = 1)
-
-
-  # RMSE
-  df_label <- df_rmse %>%
-    group_by(model) %>% 
-    summarise(mean_rmse = mean(rmse))
-  
-  g <- df_rmse %>% ggplot(aes(true_mean, rmse)) + geom_point() +
-    facet_wrap(~ model,nrow=3,labeller = as_labeller(model_labs)) +
-    geom_label(data = df_label,
-               aes( x = -Inf, y = Inf, label = paste0("RMSE = ", round(mean_rmse, 3))),
-               hjust = -0.1, vjust = 1.1) +
-    ggtitle("RMSE")
-  
-  print(g)
-  
-  
-  # Coverage
-  df_label <- df_cov %>% #filter(!(model %in% c('Mod1_1','Mod2_1','Mod3_1'))) %>%
-    group_by(model) %>% 
-    summarise(cov = mean(cov))
-  
-  g <- df_cov %>% ggplot(aes(true_mean, cov)) + geom_point() +
-    facet_wrap(~ model, nrow=3,labeller = as_labeller(model_labs)) +
-    geom_hline(yintercept = 0.9,col='red') +
-    geom_label(data = df_label,
-               aes( x = -Inf, y = Inf, label = paste0("Coverage = ", round(cov, 3))),
-               hjust = -0.1, vjust = 1.1) +
-    ggtitle("Coverage")
-  
-  print(g)
-  
-  # Interval widths
-  df_label <- df_width %>% 
-    group_by(model) %>% 
-    summarise(mean_width = mean(mean_width))
-  
-  g <- df_width %>% ggplot(aes(true_mean, mean_width)) + geom_point() +
-    facet_wrap(~ model,labeller = as_labeller(model_labs)) +
-    geom_label(data = df_label,
-               aes( x = -Inf, y = Inf, label = paste0("Mean CI width = ", round(mean_width, 3))),
-               hjust = -0.1, vjust = 1.1) +
-    ggtitle("CI Width")
-  print(g)
-  
-  # Interval score
-  df_label <- df_iscore %>% 
-    group_by(model) %>% 
-    summarise(ais = mean(i.score))
-  
-  g <- df_iscore %>% ggplot(aes(true_mean, i.score)) + geom_point() +
-    facet_wrap(~ model,labeller = as_labeller(model_labs)) +
-    geom_label(data = df_label,
-               aes( x = -Inf, y = Inf, label = paste0("AIS = ", round(ais, 3))),
-               hjust = -0.1, vjust = 1.1) +
-    ggtitle("Average Interval Scores")
-  
-  print(g)
-  
-
-  par(mfrow=c(1,1))
-  plot(results[results$model=='Mod1',]$df,results[results$model=='Mod2',]$df,cex=0.5,xlab='Naive',ylab='Satt (no kappa)',main='Degrees of freedom')
-  abline(0,1)
-  
-
-hyper.results %>% filter(param == 'sig_u[1]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'sig_u[2]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'phi2') %>% group_by(model) %>% summarise(mean(mean))
-
-hyper.results %>% filter(param == 'beta[1]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'beta[2]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'beta[3]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'beta[4]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'beta[5]') %>% group_by(model) %>% summarise(mean(mean))
-
-hyper.results %>% filter(param == 'gamma[1]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'gamma[2]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'gamma[3]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'gamma[4]') %>% group_by(model) %>% summarise(mean(mean))
-hyper.results %>% filter(param == 'gamma[5]') %>% group_by(model) %>% summarise(mean(mean))
-
-logsig2.results %>% group_by(model,area,true_value) %>% summarise(est=mean(mean)) %>% ggplot() +
-  geom_point(aes(true_value,est)) + ylab('Average estimate') + facet_wrap(~model,labeller = as_labeller(model_labs)) + 
-  geom_abline(intercept = 0,slope=1) + ggtitle('Estimate of log(sig2)')
-
-
-
-results %>% filter(model %in% c('Mod1','Mod2')) %>% dplyr::select(sim,area,model,ciwidth) %>% 
-  pivot_wider(id_cols = sim:area,names_from = model,values_from = ciwidth) %>%
-  ggplot() + geom_point(aes(Mod1,Mod2)) + geom_abline(intercept = 0,slope = 1,col='red')
-
-var.results %>% filter(model %in% c('Mod1','Mod2')) %>% dplyr::select(sim,area,model,mean) %>% 
-  pivot_wider(id_cols = sim:area,names_from = model,values_from = mean) %>%
-  ggplot() + geom_point(aes(Mod1,Mod2)) + geom_abline(intercept = 0,slope = 1,col='red')
-
-
-
+#850 x 550
+ggarrange(plotlist = list(a1,a2,a3,a4),nrow=2,ncol=2,common.legend = T,legend = "bottom")
 
 
 
