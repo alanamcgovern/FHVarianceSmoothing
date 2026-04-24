@@ -18,7 +18,7 @@
 # Output files from R CMD check
 /*.Rcheck/
 
-DEP/Other_Examples
+DEP/Other_Examples/
 
 # RStudio files
 .Rproj.user/
