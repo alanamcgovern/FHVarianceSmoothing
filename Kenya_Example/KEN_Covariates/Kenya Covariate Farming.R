@@ -78,9 +78,9 @@ cmat_admin2$pop_var_log <- log(cmat_admin2$pop_var)
 cmat_admin1$density_log <- log(cmat_admin1$density)
 cmat_admin1$pop_var_log <- log(cmat_admin1$pop_var)
 
-# nighttime lights -----
+# nighttime lights (yearly average) -----
 ## NOAA VNL
-setwd("/Users/alanamcgovern/Desktop/Research/KEN_Covariates")
+setwd("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Kenya_Example/KEN_Covariates")
 
 global_health <- rast("VNL_v22_npp-j01_2022_global_vcmslcfg_c202303062300.median_masked.dat.tif")   # path to your VIIRS/VNL GeoTIFF
 
@@ -97,7 +97,7 @@ cmat_admin1$nt_lights_var <- exact_extract(r_stack, poly.adm1, pop_weighted_var)
 cmat_admin2$nt_lights_log <- log(0.01 + cmat_admin2$nt_lights)
 cmat_admin1$nt_lights_log <- log(0.01 + cmat_admin1$nt_lights)
 
-# time to healthcare -----
+# time to healthcare (motorized) -----
 ## Malaria atlas project
 global_travel <- rast("202001_Global_Motorized_Travel_Time_to_Healthcare_KEN.tiff")
 
@@ -114,7 +114,7 @@ cmat_admin1$tthc_var <- exact_extract(r_stack, poly.adm1, pop_weighted_var)
 cmat_admin2$tthc_log <- log(cmat_admin2$tthc)
 cmat_admin1$tthc_log <- log(cmat_admin1$tthc)
 
-# Precipitation (CHIRPS annual 2018)-------------
+# Precipitation (total annual rainfall) (CHIRPS annual 2018)-------------
 prec <- rast("chirps-v2.0.2022.tif")
 prec_ken <- crop(prec, vect(ken))
 prec_ken <- mask(prec_ken, vect(ken))
@@ -130,7 +130,7 @@ cmat_admin2$precip_var <- exact_extract(r_stack, poly.adm2, pop_weighted_var)
 cmat_admin1$precip <- exact_extract(r_stack, poly.adm1, pop_weighted_mean)
 cmat_admin1$precip_var <- exact_extract(r_stack, poly.adm1, pop_weighted_var)
 
-# Temperature (WorldClim)--------------
+# Temperature (WorldClim) (yearly average) --------------
 # files <- list.files("wc2.1_2.5m_tavg/", pattern = "wc2.1_2.5m_tavg_.*\\.tif$", full.names = TRUE)
 # tmean_monthly <- rast(files)
 # 
@@ -188,40 +188,42 @@ cmat_admin1 <- cmat_admin1 %>% dplyr::select(NAME_1, admin1, admin1.char, densit
 cmat_admin2 <- cmat_admin2 %>% dplyr::select(NAME_2, admin2, admin2.char, density_log,nt_lights_log,tthc_log,precip,temp,elev,
                                              pop_var_log, nt_lights_var_log, tthc_var_log, precip_var_log, temp_var_log, elev_var_log, area_log)
 
-cmat_admin1$density_log <- normalize(cmat_admin1$density_log)
-cmat_admin1$nt_lights_log <- normalize(cmat_admin1$nt_lights_log)
-cmat_admin1$tthc_log <- normalize(cmat_admin1$tthc_log)
-cmat_admin1$precip <- normalize(cmat_admin1$precip)
-cmat_admin1$temp <- normalize(cmat_admin1$temp)
-cmat_admin1$elev <- normalize(cmat_admin1$elev)
-
-cmat_admin1$area_log <- normalize(cmat_admin1$area_log)
-cmat_admin1$pop_var_log <- normalize(cmat_admin1$pop_var_log)
-cmat_admin1$nt_lights_var_log <- normalize(cmat_admin1$nt_lights_var_log)
-cmat_admin1$tthc_var_log <- normalize(cmat_admin1$tthc_var_log)
-cmat_admin1$precip_var_log <- normalize(cmat_admin1$precip_var_log)
-cmat_admin1$temp_var_log <- normalize(cmat_admin1$temp_var_log)
-cmat_admin1$elev_var_log <- normalize(cmat_admin1$elev_var_log)
-
-cmat_admin2$density_log <- normalize(cmat_admin2$density_log)
-cmat_admin2$nt_lights_log <- normalize(cmat_admin2$nt_lights_log)
-cmat_admin2$tthc_log <- normalize(cmat_admin2$tthc_log)
-cmat_admin2$precip <- normalize(cmat_admin2$precip)
-cmat_admin2$temp <- normalize(cmat_admin2$temp)
-cmat_admin2$elev <- normalize(cmat_admin2$elev)
-
-cmat_admin2$area_log <- normalize(cmat_admin2$area_log)
-cmat_admin2$pop_var_log <- normalize(cmat_admin2$pop_var_log)
-cmat_admin2$nt_lights_var_log <- normalize(cmat_admin2$nt_lights_var_log)
-cmat_admin2$tthc_var_log <- normalize(cmat_admin2$tthc_var_log)
-cmat_admin2$precip_var_log <- normalize(cmat_admin2$precip_var_log)
-cmat_admin2$temp_var_log <- normalize(cmat_admin2$temp_var_log)
-cmat_admin2$elev_var_log <- normalize(cmat_admin2$elev_var_log)
+# cmat_admin1$density_log <- normalize(cmat_admin1$density_log)
+# cmat_admin1$nt_lights_log <- normalize(cmat_admin1$nt_lights_log)
+# cmat_admin1$tthc_log <- normalize(cmat_admin1$tthc_log)
+# cmat_admin1$precip <- normalize(cmat_admin1$precip)
+# cmat_admin1$temp <- normalize(cmat_admin1$temp)
+# cmat_admin1$elev <- normalize(cmat_admin1$elev)
+# 
+# cmat_admin1$area_log <- normalize(cmat_admin1$area_log)
+# cmat_admin1$pop_var_log <- normalize(cmat_admin1$pop_var_log)
+# cmat_admin1$nt_lights_var_log <- normalize(cmat_admin1$nt_lights_var_log)
+# cmat_admin1$tthc_var_log <- normalize(cmat_admin1$tthc_var_log)
+# cmat_admin1$precip_var_log <- normalize(cmat_admin1$precip_var_log)
+# cmat_admin1$temp_var_log <- normalize(cmat_admin1$temp_var_log)
+# cmat_admin1$elev_var_log <- normalize(cmat_admin1$elev_var_log)
+# 
+# cmat_admin2$density_log <- normalize(cmat_admin2$density_log)
+# cmat_admin2$nt_lights_log <- normalize(cmat_admin2$nt_lights_log)
+# cmat_admin2$tthc_log <- normalize(cmat_admin2$tthc_log)
+# cmat_admin2$precip <- normalize(cmat_admin2$precip)
+# cmat_admin2$temp <- normalize(cmat_admin2$temp)
+# cmat_admin2$elev <- normalize(cmat_admin2$elev)
+# 
+# cmat_admin2$area_log <- normalize(cmat_admin2$area_log)
+# cmat_admin2$pop_var_log <- normalize(cmat_admin2$pop_var_log)
+# cmat_admin2$nt_lights_var_log <- normalize(cmat_admin2$nt_lights_var_log)
+# cmat_admin2$tthc_var_log <- normalize(cmat_admin2$tthc_var_log)
+# cmat_admin2$precip_var_log <- normalize(cmat_admin2$precip_var_log)
+# cmat_admin2$temp_var_log <- normalize(cmat_admin2$temp_var_log)
+# cmat_admin2$elev_var_log <- normalize(cmat_admin2$elev_var_log)
 
 # Save covariates ------
 cmat_admin2 <- as.data.frame(cmat_admin2)
 cmat_admin1 <- as.data.frame(cmat_admin1)
 
-setwd("/Users/alanamcgovern/Desktop/Research/KEN_Covariates")
-save(cmat_admin2,file='Kenya_admin2_covariates.rda')
-save(cmat_admin1,file='Kenya_admin1_covariates.rda')
+#setwd("/Users/alanamcgovern/Desktop/Research/KEN_Covariates")
+#save(cmat_admin2,file='Kenya_admin2_covariates.rda')
+#save(cmat_admin1,file='Kenya_admin1_covariates.rda')
+save(cmat_admin2,file='Kenya_admin2_covariates_nonstd.rda')
+save(cmat_admin1,file='Kenya_admin1_covariates_nonstd.rda')

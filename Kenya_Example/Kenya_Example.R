@@ -141,34 +141,73 @@ for(cov in mean_covariates){
 }
 plot(admin2.dir.stable$mean,admin2.dir.stable[,mean_covariates[2]])
 
+c4 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=urb_frac),color='grey20',lwd=0.25) + 
+  ggtitle('Urban population proportion') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+# standardized, log-transformed population density of each area
+c5 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=density_log),color='grey20',lwd=0.25) + 
+  ggtitle('Population density') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+
+c1 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=temp),color='grey20',lwd=0.25) + 
+  ggtitle('Temperature') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+# average across area, standardized
+c2 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=precip),color='grey20',lwd=0.25) + 
+  ggtitle('Precipitation') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+# average across area, standardized
+c3 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=elev),color='grey20',lwd=0.25) + 
+  ggtitle('Elevation') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+# average across area, log-transformed and then standardized
+c6 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=nt_lights_log),color='grey20',lwd=0.25) + 
+  ggtitle('Nighttime lights') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+# average across area, log-transformed and then standardized
+c7 <- clean_map_theme + geom_sf(data=merge(poly.adm2,admin2.dir),aes(fill=tthc_log),color='grey20',lwd=0.25) + 
+  ggtitle('Motorized travel time \n to healthcare') + 
+  scale_fill_viridis_c(name = '') + theme(legend.position = 'bottom',title = element_text(size=8))
+
+# 680 x 890
+ggarrange(plotlist = list(c4,c5,c1,c2,c3,c6,c7),nrow=3,ncol=3)
+
+
+
 # STANDARD FH for comparison ------------
-mod_std <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Standard.stan")
-
-data_areas <- which(!is.na(admin2.dir.stable$mean))
-data_list = list(m=n_admin2,
-                 m_data=length(data_areas),
-                 data_areas = data_areas,
-                 y=admin2.dir.stable$mean[data_areas],
-                 v_hat = admin2.dir.stable$variance[data_areas],
-                 p_mean = ncol(mean_model_matrix),
-                 X = mean_model_matrix,
-                 bym2_mean = 1,
-                 # all bym2 stuff
-                 N_edges = nrow(nodes2),
-                 node_1 = nodes2$node1,
-                 node_2 = nodes2$node2,
-                 car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
-
-fit0 <- mod_std$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  adapt_delta = 0.99,
-  # show_messages = F,
-  #  show_exceptions = F,
-  refresh=200)
+# mod_std <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Standard.stan")
+# 
+# data_areas <- which(!is.na(admin2.dir.stable$mean))
+# data_list = list(m=n_admin2,
+#                  m_data=length(data_areas),
+#                  data_areas = data_areas,
+#                  y=admin2.dir.stable$mean[data_areas],
+#                  v_hat = admin2.dir.stable$variance[data_areas],
+#                  p_mean = ncol(mean_model_matrix),
+#                  X = mean_model_matrix,
+#                  bym2_mean = 1,
+#                  # all bym2 stuff
+#                  N_edges = nrow(nodes2),
+#                  node_1 = nodes2$node1,
+#                  node_2 = nodes2$node2,
+#                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
+# 
+# fit0 <- mod_std$sample(
+#   data = data_list,
+#   chains = 4,
+#   parallel_chains = 4,
+#   iter_warmup = 1000,
+#   iter_sampling = 1000,
+#   adapt_delta = 0.99,
+#   # show_messages = F,
+#   #  show_exceptions = F,
+#   refresh=200)
 
 
 hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
@@ -196,16 +235,21 @@ fixed_cols <- (intercept_col):(intercept_col + (n_fixed - 1))
 eta.samples <- std.samples[, fixed_cols]%*% t(X[, , drop = FALSE]) + std.samples[, 1:n_admin2]
 
 std.res <- data.frame(mean  = apply(eta.samples,2,mean),
-           variance = apply(eta.samples,2,var),
+           sd = apply(eta.samples,2,sd),
            lower = apply(eta.samples,2,quantile,prob=0.05),
            upper = apply(eta.samples,2,quantile,prob=0.95),
            area = 1:n_admin2,
            model='std')
 
+std.res$stunt <- apply(eta.samples,2,function(x){mean(x < -2)})
+std.res$lessneg1 <- apply(eta.samples,2,function(x){mean(x < -1)})
+std.res$less0 <- apply(eta.samples,2,function(x){mean(x < 0)})
+
 ranks <- t(apply(eta.samples, 1, rank, ties.method = "average"))
 prop_greater <- (ranks - 1) / n_admin2
 std.res$lower.1 <- colMeans(prop_greater < 0.1)
 std.res$lower.25 <- colMeans(prop_greater < 0.25)
+
 
 # CHOOSE covariates for variance model ---------
 formula_str <- paste0("log(variance) ~ ", paste(var_covariates, collapse = " + "), 
@@ -275,7 +319,7 @@ ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
 prop_greater <- (ranks - 1) / n_admin2
 mod1_res$lower.1 <- colMeans(prop_greater < 0.1)
 mod1_res$lower.25 <- colMeans(prop_greater < 0.25)
-
+mod1_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
 
 ## diagnostics
 summary_df <- fit1$summary()
@@ -289,6 +333,56 @@ mod1_diag <- data.frame(model = 'Mod1',
                          bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
                          tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
 rm(fit1)
+rm(theta_fit)
+
+### with BYM2 and no covariates ------------
+data_list$bym2_var <- 1
+data_list$p_var = 1
+data_list$Z = cbind(rep(1,n_admin2))
+
+# 29 seconds
+fit1b <- mod_naive$sample(
+  data = data_list,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  adapt_delta = 0.99,
+  # show_messages = F,
+  #  show_exceptions = F,
+  refresh=200)
+
+theta_fit <- as.matrix(unclass(fit1b$draws(variables = c("theta"), format = "matrix")))
+mod1b_res <- data.frame(area = 1:n_admin2,
+                       model = 'Mod1b',
+                       mean = apply(theta_fit,2,mean),
+                       sd = apply(theta_fit,2,sd),
+                       upper = apply(theta_fit,2,quantile,probs=0.95),
+                       lower = apply(theta_fit,2,quantile,probs=0.05))
+
+ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
+prop_greater <- (ranks - 1) / n_admin2
+mod1b_res$lower.1 <- colMeans(prop_greater < 0.1)
+mod1b_res$lower.25 <- colMeans(prop_greater < 0.25)
+
+mod1b_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
+mod1b_res$less0 <- apply(theta_fit,2,function(x){mean(x < 0)})
+mod1b_res$lessneg1 <- apply(theta_fit,2,function(x){mean(x < -1)})
+
+## diagnostics
+summary_df <- fit1b$summary()
+diag_df <- fit1b$diagnostic_summary()
+
+mod1b_diag <- data.frame(model = 'Mod1b',
+                        divergences = sum(diag_df$num_divergent),
+                        max_treedepth = sum(diag_df$num_max_treedepth),
+                        min_efbmi = min(diag_df$ebfmi),
+                        max_rhat = max(summary_df$rhat,na.rm=T),
+                        bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
+                        tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
+
+rm(fit1b)
+rm(theta_fit)
 
 ### with IID and no covariates (except urban prop) -------
 
@@ -329,6 +423,7 @@ mod1a_diag <- data.frame(model = 'Mod1a',
                      tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
 
 rm(fit2)
+rm(theta_fit)
 
 # SASW distribution models ---------------------------------
 mod_sasw <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Strat_noKappa.stan")
@@ -460,7 +555,7 @@ ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
 prop_greater <- (ranks - 1) / n_admin2
 mod2_res$lower.1 <- colMeans(prop_greater < 0.1)
 mod2_res$lower.25 <- colMeans(prop_greater < 0.25)
-
+mod2_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
 
 summary_df <- fit3$summary()
 diag_df    <- fit3$diagnostic_summary()
@@ -473,6 +568,56 @@ mod2_diag <- data.frame(model = 'Mod2',
                      bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
                      tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
 
+rm(theta_fit)
+rm(fit3)
+
+### fit with BYM2 and no covariates -----------
+
+data_list$p_var = 1
+data_list$Z = cbind(rep(1,n_admin2))
+data_list$bym2_var = 1
+
+# 69 s
+fit3 <- mod_sasw$sample(
+  data = data_list,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  adapt_delta = 0.99,
+  # show_messages = F,
+  #  show_exceptions = F,
+  refresh=100)
+
+theta_fit <- as.matrix(unclass(fit3$draws(variables = c("theta"), format = "matrix")))
+mod2b_res <- data.frame(area = 1:n_admin2,
+                       model = 'Mod2b',
+                       mean = apply(theta_fit,2,mean),
+                       sd = apply(theta_fit,2,sd),
+                       upper = apply(theta_fit,2,quantile,probs=0.95),
+                       lower = apply(theta_fit,2,quantile,probs=0.05))
+
+ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
+prop_greater <- (ranks - 1) / n_admin2
+mod2b_res$lower.1 <- colMeans(prop_greater < 0.1)
+mod2b_res$lower.25 <- colMeans(prop_greater < 0.25)
+
+mod2b_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
+mod2b_res$less0 <- apply(theta_fit,2,function(x){mean(x < 0)})
+mod2b_res$lessneg1 <- apply(theta_fit,2,function(x){mean(x < -1)})
+
+summary_df <- fit3$summary()
+diag_df    <- fit3$diagnostic_summary()
+
+mod2b_diag <- data.frame(model = 'Mod2b',
+                        divergences = sum(diag_df$num_divergent),
+                        max_treedepth = sum(diag_df$num_max_treedepth),
+                        min_efbmi = min(diag_df$ebfmi),
+                        max_rhat = max(summary_df$rhat,na.rm=T),
+                        bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
+                        tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
+rm(fit3)
+rm(theta_fit)
 
 ### fit with IID and no covariates (except urban prop) -----------
 
@@ -514,14 +659,14 @@ rm(fit4)
 
 # COMBINE AND SAVE MODELS ----------
 
-mods_res <- rbind(std.res[,c('area','model','mean','upper','lower','lower.1','lower.25')],
-                  mod1_res,
+mods_res <- rbind(std.res[,c('area','model','mean','sd','upper','lower','lower.1','lower.25','stunt','less0','lessneg1')],
+                  mod1b_res,
                   #mod1a_res,
-                  mod2_res)
+                  mod2b_res)
                  # mod2a_res)
-mods_diag <- rbind(mod1_diag,
+mods_diag <- rbind(mod1b_diag,
                    #mod1a_diag,
-                   mod2_diag)
+                   mod2b_diag)
                   # mod2a_diag)
 
 setwd("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Kenya_Example")
@@ -533,6 +678,12 @@ load(file='model_diagnostics.rda')
 mods_res <- mods_res %>% mutate(ci.width = upper - lower) %>% rename(admin2 = area)
 
 # PLOTS ---------
+
+model_labs <- c(
+  Mod1b = "Simple",
+  Mod2b = "SASW",
+  std = "Standard")
+
 ### assessing normality assumption -------
 hist(dir.dat$value)
 dir.dat %>% ggplot() + geom_histogram(aes(value)) + facet_grid(~urban)
@@ -606,65 +757,43 @@ m2 <- clean_map_theme + geom_sf(data=poly.adm2,aes(fill=admin2_mean),color='grey
 poly.adm2$v <- admin2.dir.stable$variance[poly.adm2$admin2]
 poly.adm1$v <- admin1.dir$variance[poly.adm1$admin1]
 
-lims <- range(admin1.dir$variance,admin2.dir.stable$variance,na.rm=T)
+lims <- range(sqrt(admin1.dir$variance),sqrt(admin2.dir.stable$variance),na.rm=T)
 
-v1 <- clean_map_theme + geom_sf(data=poly.adm1,aes(fill=v),color='grey20',lwd=0.25) + 
+v1 <- clean_map_theme + geom_sf(data=poly.adm1,aes(fill=sqrt(v)),color='grey20',lwd=0.25) + 
   ggtitle('First administrative areas') + 
-  scale_fill_scico(name = 'Design-based variance estimate',limits=lims,direction = -1,
+  scale_fill_scico(name = 'Design-based standard deviation estimate',limits=lims,direction = -1,
                    palette = 'lajolla',
-                   trans='log',breaks=c(1e-3,2e-2,0.2))
+                   trans='log',breaks=c(0.025,0.1,0.4))
 
 
-v2 <- clean_map_theme + geom_sf(data=poly.adm2,aes(fill=v),color='grey80',lwd=0.01) + 
+v2 <- clean_map_theme + geom_sf(data=poly.adm2,aes(fill=sqrt(v)),color='grey80',lwd=0.01) + 
   geom_sf(fill = "transparent", size=1, color = "grey20", lwd=0.25, data = poly.adm2 %>% group_by(NAME_1) %>% summarise()) +
   ggtitle('Second administrative areas') +
-  scale_fill_scico(name = 'Design-based variance estimate',limits=lims,direction = -1,
+  scale_fill_scico(name = 'Design-based standard deviation estimate',limits=lims,direction = -1,
                    palette = 'lajolla',
-                   trans='log',breaks=c(1e-3,2e-2,0.2))
+                   trans='log',breaks=c(0.025,0.1,0.4))
 
 top_row <- (m1 | m2) + plot_layout(guides = "collect")
 bottom_row <- (v1 | v2) + plot_layout(guides = "collect")
 
+# 755 x 850
 top_row / bottom_row &
   theme(legend.position = "bottom")
 
 
 
 
-### model results -------
-model_labs <- c(
-  Mod1 = "Naive-struct",
-  Mod2 = "SASW-struct",
-  Mod4 = "Debias-SASW-struct",
-  Mod1a = "Naive-unstruct",
-  Mod2a = "SASW-unstruct",
-  Mod4a = "Debias-SASW-unstruct",
-  oracle = "Oracle",
-  std = "Standard")
-
-model_colors <- c(
-  "Mod1"   = "#1f78b4",  # dark blue
-  "Mod1a"  = "#a6cee3",  # light blue
-  
-  "Mod2"   = "#6a3d9a",  # dark orange
-  "Mod2a"  = "#cab2d6",  # light orange
-  
-  "Mod4"   = "#e31a1c",
-  "Mod4a"  = "#fb9a99",
-  
-  "oracle" = "#A1D99B",  # dark purple
-  "std"    = "#E6AB02"   # light purple
-)
+### model results maps -------
 
 lims <- range(mods_res$mean)
 
 m1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=mean)) +
   ggtitle('Standard') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
-m2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1',]),aes(fill=mean)) +
-  ggtitle('Naive') +
+m2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=mean)) +
+  ggtitle('Simple') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
-m3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2',]),aes(fill=mean)) +
+m3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=mean)) +
   ggtitle('SASW') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 
@@ -675,10 +804,10 @@ lims <- range(mods_res$ci.width)
 v1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=ci.width)) +
   ggtitle('Standard') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
-v2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1',]),aes(fill=ci.width)) +
-  ggtitle('Naive') +
+v2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=ci.width)) +
+  ggtitle('Simple') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
-v3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2',]),aes(fill=ci.width)) +
+v3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=ci.width)) +
   ggtitle('SASW') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
 
@@ -690,11 +819,11 @@ d1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=
   ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
   theme(legend.position = 'none')
 
-d2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1',]),aes(fill=lower.1)) +
-  ggtitle('Naive') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+d2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=lower.1)) +
+  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
   theme(legend.position = 'none')
 
-d3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2',]),aes(fill=lower.1)) +
+d3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lower.1)) +
   ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
   theme(legend.position = 'none')
 
@@ -705,10 +834,10 @@ lims <- range(mods_res$lower.25)
 q1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=lower.25)) +
   ggtitle('Standard') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
-q2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1',]),aes(fill=lower.25)) +
-  ggtitle('Naive') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
+q2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=lower.25)) +
+  ggtitle('Simple') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
-q3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2',]),aes(fill=lower.25)) +
+q3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lower.25)) +
   ggtitle('SASW') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
 row4 <- ggarrange(plotlist = list(q1,q2,q3),common.legend = T,nrow=1,legend = 'bottom')
@@ -724,18 +853,110 @@ row4 <- annotate_figure(row4,
                                         size = 16, hjust = 0, x = 0))
 ggarrange(row3,row4,ncol = 1,common.legend = T,heights = c(1,1.15))
 
+pdf('test.pdf')
+## STUNTING (near 0)
+lims <- range(mods_res$stunt)
+
+s1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=stunt)) +
+  ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
+  theme(legend.position = 'none')
+
+s2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=stunt)) +
+  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  theme(legend.position = 'none')
+
+s3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=stunt)) +
+  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  theme(legend.position = 'none')
+
+print(ggarrange(plotlist = list(s1,s2,s3),common.legend = T,nrow=1,legend = 'bottom'))
+
+## HAZ < 0 (near 1)
+lims <- range(mods_res$less0)
+
+s1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=less0)) +
+  ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
+  theme(legend.position = 'none')
+
+s2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=less0)) +
+  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  theme(legend.position = 'none')
+
+s3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=less0)) +
+  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  theme(legend.position = 'none')
+
+print(ggarrange(plotlist = list(s1,s2,s3),common.legend = T,nrow=1,legend = 'bottom'))
+
+## HAZ < -1 
+lims <- range(mods_res$lessneg1)
+
+s1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=lessneg1)) +
+  ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
+  theme(legend.position = 'none')
+
+s2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=lessneg1)) +
+  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  theme(legend.position = 'none')
+
+s3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lessneg1)) +
+  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  theme(legend.position = 'none')
 
 
-mods_res %>% ggplot(aes(model,upper-lower)) + 
-  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-  stat_summary(fun = mean, geom = "crossbar", width = 0.9, lwd=0.25, color = "grey60") + 
-  labs(x=NULL,y=NULL) + theme_bw() +
-  scale_fill_manual(name="Model",values = model_colors,labels=model_labs) + 
-  theme(plot.title = element_text(size=12),
-        axis.text.x = element_blank(),
-        axis.text.y = element_text(size=6),
-        legend.position = 'bottom')
+print(ggarrange(plotlist = list(s1,s2,s3),common.legend = T,nrow=1,legend = 'bottom'))
 
+dev.off()
+
+
+### model results scatter plots -------
+
+dir.est.tmp <- admin2.dir.stable %>% 
+  rename(direct.est = mean) %>% mutate(direct.sd = sqrt(variance)) %>%
+  dplyr::select(admin2,direct.est,direct.sd)
+
+lims <- range(mods_res$mean,dir.est.tmp$direct.est,na.rm=T)
+
+mean_scatter <- merge(mods_res,dir.est.tmp,by='admin2') %>% ggplot() + geom_point(aes(direct.est,mean),size=0.5) + 
+  xlim(lims) + ylim(lims) +ggtitle('A. Mean') +
+  xlab('Direct') + ylab('Model-based') +
+  facet_wrap(~model,labeller=as_labeller(model_labs)) + geom_abline(intercept = 0,slope=1)
+
+lims <- range(mods_res$sd,dir.est.tmp$direct.sd,na.rm=T)
+
+var_scatter <- merge(mods_res,dir.est.tmp,by='admin2') %>% ggplot() + geom_point(aes(direct.sd,sd),size=0.5) + 
+  xlim(lims) + ylim(lims) + ggtitle('B. Standard deviation') +
+  xlab('Direct') + ylab('Model-based') +
+  facet_wrap(~model,labeller=as_labeller(model_labs)) + geom_abline(intercept = 0,slope=1)
+
+# 760 x 555
+ggarrange(plotlist = list(mean_scatter,var_scatter),nrow=2)
+
+### line plots ------
+
+tmp <- mods_res %>% filter(model=='Mod1b')
+tmp <- tmp[order(tmp$mean),]
+tmp$area_order <- 1:n_admin2
+
+order_key <- tmp[,c('admin2','area_order')]
+
+mods_res <- merge(mods_res,order_key,by='admin2')
+
+
+
+
+mods_res <- mods_res %>% 
+  mutate(special_areas = #ifelse(admin2 %in% c(90,200,217,218),1,
+                        ifelse(admin2 %in% mods_res[mods_res$model=='std' & mods_res$ci.width<0.15,]$admin2,1,
+                                ifelse(admin2 %in% mods_res[mods_res$model=='std' & mods_res$ci.width>1,]$admin2,2,0)))
+# 700 x 740
+mods_res %>% ggplot() + 
+  geom_segment(aes(x = area_order, xend = area_order, y=lower, yend = upper,colour = factor(special_areas)),lwd=0.5) + theme_bw() +
+  geom_point(aes(area_order,mean),color='grey40',size=0.25)+ 
+  xlab('Second adminstrative area (ordered by mean estimate under Simple model)') + ylab('Height-for-age z-score') +
+  scale_color_manual(values = c('0'='grey50','1'='purple3','2'='orange3')) +
+  theme(axis.text.x = element_blank(),legend.position = 'none') +
+  facet_wrap(~model,labeller=as_labeller(model_labs),nrow=3)
 
 # CALIBRATE parameters for simulations ----------
 
