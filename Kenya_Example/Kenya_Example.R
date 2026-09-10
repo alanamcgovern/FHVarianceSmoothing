@@ -187,7 +187,7 @@ ggarrange(plotlist = list(c4,c5,c1,c2,c3,c6,c7),nrow=3,ncol=3)
 
 
 
-# STANDARD FH for comparison ------------
+# STANDARD FH for comparison (Stan) ------------
 mod_std <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Standard.stan")
 
 data_areas <- which(!is.na(admin2.dir.stable$mean))
@@ -216,7 +216,14 @@ fit0 <- mod_std$sample(
   #  show_exceptions = F,
   refresh=200)
 
+theta_fit <- as.matrix(unclass(fit0$draws(variables = c("theta"), format = "matrix")))
+standard_res <- data.frame(area = 1:n_admin2,
+                       model = 'Standard',
+                       mean = apply(theta_fit,2,mean),
+                       upper = apply(theta_fit,2,quantile,probs=0.95),
+                       lower = apply(theta_fit,2,quantile,probs=0.05))
 
+# STANDARD FH for comparison (INLA) ------------
 
 hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
                     phi = list(prior = "pc", param = c(0.5, 0.5)))
@@ -268,7 +275,7 @@ test.fit <- inla(as.formula(formula_str),
                 data = admin2.dir.stable)
 
 # NAIVE distribution models --------------
-mod_naive <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/NonStrat.stan")
+mod_naive <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Simple.stan")
 
 data_areas <- which(!is.na(admin2.dir.stable$mean))
 Cons_naive <- scale_naive <- df_naive <- v_hat_scaled_naive <- rep(NA,n_admin2)
@@ -434,7 +441,7 @@ rm(fit2)
 rm(theta_fit)
 
 # SASW distribution models ---------------------------------
-mod_sasw <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Strat_noKappa.stan")
+mod_sasw <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/SASW.stan")
 
 data_areas <- which(!is.na(admin2.dir.stable$mean))
 cons_exact <- v_hat_scaled_exact <- q_start <- rep(NA,n_admin2)
