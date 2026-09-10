@@ -134,6 +134,13 @@ admin2.dir.stable <- admin2.dir
 admin2.dir.stable$variance <- ifelse(admin2.dir.stable$variance < 1e-5,NA,admin2.dir.stable$variance)
 admin2.dir.stable$mean <- ifelse(is.na(admin2.dir.stable$variance),NA,admin2.dir.stable$mean)
 
+# which admin2 areas are excluded
+no_direct_areas <- which(!((1:n_admin2) %in% admin2.dir.stable[!is.na(admin2.dir.stable$mean),]$admin2))
+no_sample_areas <- which(!((1:n_admin2) %in% dir.dat$admin2))
+
+dir.dat %>% group_by(admin2,urban) %>% summarise(m=length(unique(cluster))) %>% filter(m==1)
+
+
 # COVARIATE PLOTS ---------
 for(cov in mean_covariates){
   plot(admin2.dir.stable$mean,admin2.dir.stable[,cov],main=cov)
@@ -181,33 +188,34 @@ ggarrange(plotlist = list(c4,c5,c1,c2,c3,c6,c7),nrow=3,ncol=3)
 
 
 # STANDARD FH for comparison ------------
-# mod_std <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Standard.stan")
-# 
-# data_areas <- which(!is.na(admin2.dir.stable$mean))
-# data_list = list(m=n_admin2,
-#                  m_data=length(data_areas),
-#                  data_areas = data_areas,
-#                  y=admin2.dir.stable$mean[data_areas],
-#                  v_hat = admin2.dir.stable$variance[data_areas],
-#                  p_mean = ncol(mean_model_matrix),
-#                  X = mean_model_matrix,
-#                  bym2_mean = 1,
-#                  # all bym2 stuff
-#                  N_edges = nrow(nodes2),
-#                  node_1 = nodes2$node1,
-#                  node_2 = nodes2$node2,
-#                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
-# 
-# fit0 <- mod_std$sample(
-#   data = data_list,
-#   chains = 4,
-#   parallel_chains = 4,
-#   iter_warmup = 1000,
-#   iter_sampling = 1000,
-#   adapt_delta = 0.99,
-#   # show_messages = F,
-#   #  show_exceptions = F,
-#   refresh=200)
+mod_std <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Standard.stan")
+
+data_areas <- which(!is.na(admin2.dir.stable$mean))
+data_list = list(m=n_admin2,
+                 m_data=length(data_areas),
+                 data_areas = data_areas,
+                 y=admin2.dir.stable$mean[data_areas],
+                 v_hat = admin2.dir.stable$variance[data_areas],
+                 p_mean = ncol(mean_model_matrix),
+                 X = mean_model_matrix,
+                 bym2_mean = 1,
+                 # all bym2 stuff
+                 N_edges = nrow(nodes2),
+                 node_1 = nodes2$node1,
+                 node_2 = nodes2$node2,
+                 car_scale = Q2_scaled[1,1]/Q.admin2[1,1])
+
+fit0 <- mod_std$sample(
+  data = data_list,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  adapt_delta = 0.99,
+  # show_messages = F,
+  #  show_exceptions = F,
+  refresh=200)
+
 
 
 hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
@@ -693,14 +701,15 @@ dir.dat %>% ggplot() + geom_histogram(aes(value)) + facet_wrap(~admin1)
 ### distribution of cluster sizes ---------
 cluster_sizes <- dir.dat %>% group_by(admin1,admin2,v025,cluster) %>% summarise(n= n())
 
-par(mfrow=c(1,2),mar = c(5, 1, 4, 1),   # bottom, left, top, right
-    oma = c(0, 0, 0, 0))
+par(mfrow=c(1,2)#,#mar = c(3, 1, 4, 1),   # bottom, left, top, right
+  #  oma = c(0, 0, 0, 0)
+    )
 hist(cluster_sizes[cluster_sizes$v025==1,]$n,prob=T,
-     main = 'Urban clusters',ylab='',yaxt='n',xlab='sampled individuals')
+     main = 'Urban clusters',xlab='sampled individuals',xlim=c(0,50),ylim=c(0,0.1))
 lines(1:50-0.5,dnbinom(1:50,size=8,mu=9),col='red',lwd=2)
 
 hist(cluster_sizes[cluster_sizes$v025==2,]$n,prob=T,
-     main = 'Rural clusters',ylab='',yaxt='n',xlab='sampled individuals')
+     main = 'Rural clusters',xlab='sampled individuals',xlim=c(0,50),ylim=c(0,0.1))
 lines(1:50-0.5,dnbinom(1:50,size=4,mu=11),col='red',lwd=2)
 
 
@@ -710,10 +719,8 @@ cluster_sizes <- dir.dat %>% group_by(admin1,admin2,v025,cluster) %>% summarise(
 admin1_sizes <- cluster_sizes %>% group_by(admin1) %>% summarise(m=n())
 admin2_sizes <- cluster_sizes %>% group_by(admin2) %>% summarise(m=n())
 
-lims = c(0,max(admin1_sizes$m))
-
 d1 <- clean_map_theme + geom_sf(data = merge(poly.adm1,admin1_sizes),aes(fill=m),color='grey20',lwd=0.25) + 
-  scale_fill_viridis_c(name='Number of sampled clusters',direction = -1,limits = c(0,max(admin1_sizes$m))) + 
+  scale_fill_viridis_c(name='Number of sampled clusters',direction = -1,limits = c(1,max(admin1_sizes$m)),breaks=c(1,10,20,30,40,50)) + 
   theme(legend.position = 'bottom') +
   ggtitle('First administrative areas')
 
@@ -731,7 +738,7 @@ d2 <- clean_map_theme + geom_sf(data = adm2_merge,aes(fill=m),color='grey20',lwd
                   pattern_angle = 45,
                   color = "black",       # color of hatch lines
                   pattern_spacing = 0.01) +
-  scale_fill_viridis_c(name='Number of sampled clusters',direction = -1, limits = c(0,max(admin1_sizes$m))) + 
+  scale_fill_viridis_c(name='Number of sampled clusters',direction = -1, limits = c(1,max(admin1_sizes$m))) + 
   theme(legend.position = 'bottom')+
   ggtitle('Second administrative areas')
 
