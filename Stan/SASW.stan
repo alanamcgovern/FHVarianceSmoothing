@@ -1,4 +1,3 @@
-
 functions {
   
   real icar_lp(vector u, array[] int node1, array[] int node2) {
@@ -25,10 +24,16 @@ data {
   array[m_data] int data_areas;
   vector[m_data] y;                     // direct estimates
   vector[m_data] v_hat_scaled;         // variance estimates, rescaled for chi square approximation
+   vector[m_data] Cons;
   
-  //constants 
-  vector[m_data] df;
-  vector[m_data] Cons;
+  //constants for Satt approximation
+  int lenq;
+  array[lenq] int q_id;
+  array[m_data] int q_start;
+  array[m_data] int q_per_area;
+  vector[lenq] q;
+  vector[lenq] nu;
+  int<lower=0,upper=1> bias_adj;
   
   // Covariates for the mean model
   int<lower=1> p_mean;             // number of mean covariates
@@ -54,8 +59,8 @@ parameters {
   vector[p_var] gamma;             // coefficients for variance model
   vector[m] u1;
   vector[m] u2;
-  vector[m] z_s1;   // unconstrained ICAR
-  vector[m] z_s2;   // unconstrained
+  sum_to_zero_vector[m] s1_raw;
+  sum_to_zero_vector[m] s2_raw;
   vector<lower=0>[2] sig_u;
   real<lower=0,upper=1> phi1;
   real<lower=0,upper=1> phi2;
@@ -68,14 +73,12 @@ transformed parameters {
   vector<lower=0>[m_data] v_data;
   vector<lower=0>[m_data] v_raw;
   vector[m] s1; // ICAR
-  vector[m] s1_raw; // ICAR
   vector[m] s2; // ICAR
-  vector[m] s2_raw; // ICAR
   vector[m] b1;
   vector[m] b2;
-  
-  s1_raw = z_s1 - mean(z_s1);      // sum-to-zero enforced here
-  s2_raw = z_s2 - mean(z_s2);      // sum-to-zero enforced here
+  vector[lenq] delta;
+  matrix[m_data,2] Q;
+  vector<lower=0.999>[m_data] df;
   
   // random effects:
   if(bym2_mean==1){
@@ -94,14 +97,24 @@ transformed parameters {
 
   theta = X * beta + b1;
   log_sig2 = Z * gamma + b2;
-  
+   
+  delta = square(nu*beta[2])./exp(log_sig2[q_id]);
+
   for(a in 1:m_data){
     theta_data[a] = theta[data_areas[a]];
-    v_data[a] = exp(log_sig2[data_areas[a]])*Cons[a];
+    v_data[a] = exp(log_sig2[data_areas[a]]).*Cons[a];
+    
+    Q[a,1] = sum(q[q_start[a]:(q_start[a]+q_per_area[a]-1)].*(1+delta[q_start[a]:(q_start[a]+q_per_area[a]-1)]));
+    Q[a,2] = sum(square(q[q_start[a]:(q_start[a]+q_per_area[a]-1)]).*(1+2*delta[q_start[a]:(q_start[a]+q_per_area[a]-1)]));
   }
   
- v_raw = v_hat_scaled./v_data;
- 
+  df = square(Q[,1])./Q[,2];
+  if(bias_adj==1){
+    v_raw = (v_hat_scaled./v_data).*(square(Q[,1])./Q[,2]);
+  }else{
+    v_raw = (v_hat_scaled./v_data).*(Q[,1]./Q[,2]);
+  }
+
 }
 
 // The model to be estimated.
@@ -114,9 +127,6 @@ model {
   
   u1 ~ normal(0,1);
   u2 ~ normal(0,1);
-  
-  z_s1 ~ normal(0, 1);
-  z_s2 ~ normal(0, 1);
   
   if(bym2_mean==1){
     target += icar_lp(s1_raw, node_1, node_2);
