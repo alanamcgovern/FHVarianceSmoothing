@@ -1,4 +1,4 @@
-## fit Type 1 model (naive): 
+## fit Simple smoothing model:
 # does not account for sample weights and sizes or unplanned domain
 # only account for stratification in the mean and variance by including the urban proportion as a covariate in the latent layer
 
@@ -15,8 +15,8 @@ args <- commandArgs(trailingOnly=TRUE)
 setting <- as.numeric(args[1])
 k <- as.numeric(args[2])
 
-mod <- cmdstan_model(stan_file = "NonStrat.stan")
-##mod <- cmdstan_model(stan_file = "Stan/NonStrat.stan")
+mod <- cmdstan_model(stan_file = "Simple.stan")
+##mod <- cmdstan_model(stan_file = "Stan/Simple.stan")
 
 setwd(paste0('Sim',setting))
 
@@ -56,35 +56,33 @@ data_areas <- which(!is.na(dir.dat$mean))
 Cons_naive <- scale_naive <- df_naive <- v_hat_scaled_naive <- rep(NA,n_admin2)
 
 for(area in data_areas){
-
+  
   tmp_D <- sampled_clusters[[k]] %>% filter(admin2 == area)
   N_D <- c(sum(1-tmp_D$urban),sum(tmp_D$urban))
   
- # if(sum(N_D>0)==2){
-    df_naive[area] <- pmax(1,sum(N_D) - sum(N_D>0))
-    v_hat_scaled_naive[area] <- dir.dat$variance[area]*pmax(1,sum(N_D) - sum(N_D>0))
-    Cons_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n))
-    scale_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n)*pmax(1,sum(N_D) - sum(N_D>0)))
- # }
+  df_naive[area] <- pmax(1,sum(N_D) - sum(N_D>0))
+  v_hat_scaled_naive[area] <- dir.dat$variance[area]*pmax(1,sum(N_D) - sum(N_D>0))
+  Cons_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n))
+  scale_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n)*pmax(1,sum(N_D) - sum(N_D>0)))
 }
 
 data_areas <- which(!is.na(df_naive))
 
 data_list = list(m=n_admin2,
-                       m_data=length(data_areas),
-                       data_areas = data_areas,
-                       y=dir.dat$mean[data_areas],
-                       v_hat_scaled = v_hat_scaled_naive[data_areas],
-                       df=df_naive[data_areas],
+                 m_data=length(data_areas),
+                 data_areas = data_areas,
+                 y=dir.dat$mean[data_areas],
+                 v_hat_scaled = v_hat_scaled_naive[data_areas],
+                 df=df_naive[data_areas],
                  Cons = Cons_naive[data_areas],
-                       p_mean = ncol(mean_model_matrix_admin2),
-                       X = mean_model_matrix_admin2,
-                       bym2_mean = 1,
-                       # all bym2 stuff
-                       N_edges = nrow(objects$nodes2),
-                       node_1 = objects$nodes2$node1,
-                       node_2 = objects$nodes2$node2,
-                       car_scale = objects$car_scale2) 
+                 p_mean = ncol(mean_model_matrix_admin2),
+                 X = mean_model_matrix_admin2,
+                 bym2_mean = 1,
+                 # all bym2 stuff
+                 N_edges = nrow(objects$nodes2),
+                 node_1 = objects$nodes2$node1,
+                 node_2 = objects$nodes2$node2,
+                 car_scale = objects$car_scale2) 
 
 # use BYM2 and covariates -------
 
@@ -169,7 +167,7 @@ fit1 <- mod$sample(
   adapt_delta = 0.99,
   show_messages = F,
   show_exceptions = F,
-  refresh=0)
+  refresh=200)
 
 theta_fit1 <- as.matrix(unclass(fit1$draws(variables = c("theta"), format = "matrix")))
 write.csv(data.frame(sim=k,
@@ -224,4 +222,9 @@ if(nrow(prob_params)>0){
 rm(fit1,theta_fit1,v_fit1,hyper_fit1)
 
 
+median(v_fit1[,1])
+median(exp(hyper_fit1[,2]))
 
+exp(median(hyper_fit1[,2]))/(sum(N_D)*mean(tmp_D$n))
+
+median(exp(hyper_fit1[,2]))/(sum(N_D)*mean(tmp_D$n))

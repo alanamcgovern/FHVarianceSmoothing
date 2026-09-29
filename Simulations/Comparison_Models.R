@@ -16,7 +16,7 @@ source("/Users/alanamcgovern/Desktop/Research/my_helpers.R")
 
 setwd("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing")
 
-setting <- 7
+setting <- 1
 # load simulation objects -------------
 setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim",setting))
 
@@ -24,7 +24,6 @@ load(file=paste0('direct.rda'))
 load(file=paste0('params.rda'))
 load(file=paste0('cmat_admin2.rda'))
 load(file=paste0('sampled_clusters.rda'))
-#load(file=paste0('true_vals.rda'))
 
 # load geometry ------
 setwd('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Kenya_Example')
@@ -224,55 +223,89 @@ for(k in 1:100){
 }
 
 # summarise accuracy of naive and sw distributions for each area x sim -------
+
 tol <- 1e-10
+probs <- seq(0.01, 0.99, 0.01)
 dist_metrics <- NULL
-for(k in 1:100){
-  cat(setting,'--',k,'\n')
-  dir.dat <- direct[[k]]
+n_admin2 <- 300
+
+for(setting in c(1:5,7)){
+  
+  setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim",setting))
+  
+  load(file=paste0('direct_all.rda'))
+  load(file=paste0('objects.rda'))
+  load(file=paste0('params.rda'))
+  load(file=paste0('sampled_clusters.rda'))
+
+truth_mat <- sapply(direct_all, function(x) x$var)   # n_admin2 x length(direct)
+truth_precomp <- lapply(seq_len(nrow(truth_mat)), function(a) {
+  dv <- truth_mat[a, ]
+  dv <- dv[dv > 1e-5]
+  dv <- dv[!is.na(dv)]
+  list(mean = mean(dv), var = var(dv), skew = moments::skewness(dv), q = quantile(dv, probs = probs))
+})
+
+# admin2 -> admin1 lookup as a vector instead of re-filtering admin.key each time
+admin1_lookup <- objects$admin.key$admin1[match(seq_len(nrow(truth_mat)), objects$admin.key$admin2)]
+
+for (k in 1:100) {
+  cat(setting, '--', k, '\n')
+  dir.dat <- direct_all[[k]]
   
   change_id <- which(dir.dat$variance < 1e-5)
-  if(length(change_id)>0){
-    dir.dat[change_id,]$variance <- NA
-    dir.dat[change_id,]$mean <- NA
+  if (length(change_id) > 0) {
+    dir.dat[change_id, c("variance", "mean")] <- NA
   }
   
   data_areas <- which(!is.na(dir.dat$mean))
   
-  tmp <- sapply(data_areas,function(area){
+  # split once per k instead of filter()-ing per area
+  sc_k <- sampled_clusters[[k]]
+  split_admin2 <- split(sc_k, sc_k$admin2)
+  split_admin1 <- split(sc_k, sc_k$admin1)
+  
+  res <- sapply(data_areas, function(area) {
     mu_diff <- params$admin2_strata_mean[area] - params$admin2_strata_mean[n_admin2 + area]
     sig2_k <- params$sig2_pop[area]
     
-    tmp_D <- sampled_clusters[[k]] %>% filter(admin2 == area)
-    N_D <- c(sum(1-tmp_D$urban),sum(tmp_D$urban))
+    tmp_D <- split_admin2[[as.character(area)]]
+    N_D <- c(sum(1 - tmp_D$urban), sum(tmp_D$urban))
+    
+    # srs
+    df_srs <- sum(tmp_D$n) - 1
+    scale_srs <- sig2_k / (sum(tmp_D$n) * df_srs)
+    dist_srs <- scale_srs * rchisq(1e4, df_srs)
+    q_srs <- quantile(dist_srs, probs)
     
     # naive
-    df_naive <- pmax(1,sum(N_D) - sum(N_D>0))
-    scale_naive <- sig2_k/(sum(N_D)*mean(tmp_D$n)*pmax(1,sum(N_D) - sum(N_D>0)))
-    dist_naive <- scale_naive*rchisq(1e4,df_naive)
-    q_naive <- quantile(dist_naive,seq(0.01,0.99,0.01))
+    df_naive <- pmax(1, sum(N_D) - sum(N_D > 0))
+    scale_naive <- sig2_k / (sum(N_D) * mean(tmp_D$n) * pmax(1, sum(N_D) - sum(N_D > 0)))
+    dist_naive <- scale_naive * rchisq(1e4, df_naive)
+    q_naive <- quantile(dist_naive, probs)
     
-    tmp <- sampled_clusters[[k]] %>% filter(admin1 == admin.key[admin.key$admin2 == area,]$admin1) %>% arrange(urban)# %>% mutate(wt=wt/1e3)
-    tmp$wt <- pmin(tmp$wt,quantile(tmp$wt,0.95))
+    base1 <- split_admin1[[as.character(admin1_lookup[area])]]
+    tmp <- base1[order(base1$urban), ]
+    tmp$wt <- pmin(tmp$wt, quantile(tmp$wt, 0.95))
+    tmp[tmp$admin2 != area, "wt"] <- 0
+    N <- c(sum(1 - tmp$urban), sum(tmp$urban))
     
-    tmp[tmp$admin2 != area,]$wt <- 0
-    N <- c(sum(1-tmp$urban),sum(tmp$urban))
+    omega <- tmp$n * tmp$wt
     
-    omega <- tmp$n*tmp$wt
-    
-    B_comps <- lapply(1:2,function(h){
-      if(N[h]>0){
-        return(N[h]/(N[h]-1)*(diag(1,N[h]) - 1/N[h]*matrix(1,N[h],N[h])))
+    B_comps <- lapply(1:2, function(h) {
+      if (N[h] > 0) {
+        return(N[h] / (N[h] - 1) * (diag(1, N[h]) - 1 / N[h] * matrix(1, N[h], N[h])))
       }
     })
     
     which.not.null <- c(1:2)[!sapply(B_comps, is.null)]
     B <- bdiag(B_comps[which.not.null])
-    W <- diag(omega)%*%(diag(1,sum(N)) - (rep(1,sum(N))%*%t(omega))/sum(omega))
-    C <- t(W)%*%B%*%W
-    S <- diag(1/tmp$n)
+    W <- diag(omega) %*% (diag(1, sum(N)) - (rep(1, sum(N)) %*% t(omega)) / sum(omega))
+    C <- t(W) %*% B %*% W
+    S <- diag(1 / tmp$n)
     
-    L <- chol(S)              # S = L' L
-    Li <- backsolve(L, diag(nrow(S)))  # L^{-1}
+    L <- chol(S)                          # S = L' L
+    Li <- backsolve(L, diag(nrow(S)))     # L^{-1}
     
     # Form scale-free matrix A = S^{1/2} C S^{1/2}
     A <- t(L) %*% C %*% L
@@ -283,44 +316,68 @@ for(k in 1:100){
     keep_id <- which(out$values > tol)
     q <- out$values[keep_id]
     
-    V <- V[,keep_id]
-    nu <- t(V)%*%tmp$urban
-    delta <- (nu*mu_diff)^2/sig2_k
+    V <- V[, keep_id]
+    nu <- t(V) %*% tmp$urban
+    delta <- (nu * mu_diff)^2 / sig2_k
     r <- length(keep_id)
     
-    Q1 <- sum(q*(1+delta))
-    Q2 <- sum(q^2*(1+2*delta))
+    Q1 <- sum(q * (1 + delta))
+    Q2 <- sum(q^2 * (1 + 2 * delta))
     
-    # satterthwhaite
-    scale_satt <- sig2_k/sum(omega)^2*Q2/Q1
-    df_satt <- Q1^2/Q2
+    # satterthwaite
+    scale_satt <- sig2_k / sum(omega)^2 * Q2 / Q1
+    df_satt <- Q1^2 / Q2
     
-    dist_satt <- scale_satt*rchisq(1e4,df_satt)
-    q_satt <- quantile(dist_satt,seq(0.01,0.99,0.01))
+    dist_satt <- scale_satt * rchisq(1e4, df_satt)
+    q_satt <- quantile(dist_satt, probs)
     
-    dist_truth <- unlist(lapply(direct, function(x){x$var[area]}))
-    dist_truth <- dist_truth[dist_truth>1e-5]
-    dist_truth <- dist_truth[!is.na(dist_truth)]
-    q_truth <- quantile(dist_truth,probs=seq(0.01,0.99,0.01))
-    
-    return(c(sqrt(mean((q_naive - q_truth)^2)),
-             mean(dist_naive)/mean(dist_truth),
-             mean(dist_naive) - mean(dist_truth),
-             sqrt(mean((q_satt - q_truth)^2)),
-             mean(dist_satt)/mean(dist_truth),
-             mean(dist_satt) - mean(dist_truth)))
-    
+    truth_a <- truth_precomp[[area]]
+    q_truth <- truth_a$q
+
+    c(mean_truth = truth_a$mean,
+      var_truth = truth_a$var,
+      skew_truth = truth_a$skew,
+      q_truth[50],
+      
+      sqrt(mean((q_srs - q_truth)^2)),
+      mean(dist_srs),
+      var(dist_srs),
+      moments::skewness(dist_srs),
+      q_srs[50],
+      df_srs,
+      
+      sqrt(mean((q_naive - q_truth)^2)),
+      mean(dist_naive),
+      var(dist_naive),
+      moments::skewness(dist_naive),
+      q_naive[50],
+      df_naive,
+      
+      sqrt(mean((q_satt - q_truth)^2)),
+      mean(dist_satt),
+      var(dist_satt),
+      moments::skewness(dist_satt),
+      q_satt[50],
+      df_satt)
   })
   
-  tmp <- as.data.frame(t(tmp))
-  tmp$area <- data_areas
-  tmp$sim <- k
-  tmp$setting <- setting
-  dist_metrics <- rbind(dist_metrics,tmp)
+  res <- as.data.frame(t(res))
+  res$area <- data_areas
+  res$sim <- k
+  res$setting <- setting
+  dist_metrics <- rbind(dist_metrics, res)
 }
 
-colnames(dist_metrics)[1:6] <- c('Wass_Naive','Ratio_Naive','Diff_Naive',
-                                 'Wass_Satt','Ratio_Satt','Diff_Satt')
+}
+
+colnames(dist_metrics)[1:22] <- c('True_mean','True_var','True_skew','True_median',
+  'Wass_srs','srs_mean','srs_var','srs_skew','srs_median','srs_df',
+  'Wass_naive','naive_mean','naive_var','naive_skew','naive_median','naive_df',
+  'Wass_satt','satt_mean','satt_var','satt_skew','satt_median','satt_df')
+
+setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations"))
+
+save(dist_metrics, file = 'approx_dist_metrics.rda')
 
 # what is Satterwhaite scale and df under correct parameters -------
 

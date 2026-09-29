@@ -86,7 +86,6 @@ for(area1 in 1:n_admin1){
   A_2to1[area1,which.areas2] <- pop.admin2[pop.admin2$admin2 %in% which.areas2,]$admin_pop/sum(pop.admin2[pop.admin2$admin2 %in% which.areas2,]$admin_pop)
 }
 
-
 # sampling info (survey specific) -------------
 
 # total number of EAs in each strata
@@ -154,7 +153,22 @@ merge(ea_totals %>% group_by(NAME_1) %>% summarise(urb_frac_pop = sum(urban*EAs)
   ggplot() + geom_point(aes(urb_frac_pop,urb_frac_sample),pch=1,size=2) + geom_abline(intercept = 0,slope = 1) + xlim(0,1) + ylim(0,1)+
   xlab('Proportion of urban clusters in population') + ylab('Proportion of urban clusters in sample') + theme_bw()
 
-# sort population into clusters -----------
+# helper function ----------
+
+## admin2
+admin2.HT.withNA <- function(which.area) {
+  admin2 <- NULL
+  tmp <- subset(my.svydesign, (admin2 == as.character(which.area)))
+  
+  if (dim(tmp)[1] == 0) {
+    return(c(which.area,rep(NA, 2)))
+  } else {
+    lm.ob <- survey::svymean(value ~ 1, design = tmp)
+    return(c(which.area, lm.ob[1], vcov(lm.ob)))
+  }
+}
+
+# (RANDOM) sort population into clusters -----------
 cluster_frame <- ea_totals[rep(1:.N, EAs)]
 cluster_frame[, cluster := seq_len(.N)]
 cluster_frame[,EAs := NULL]
@@ -198,7 +212,7 @@ sim_pop_long <- merge(cluster_frame,sim_pop_long,by=c('NAME_1','admin1','admin1.
 # add population totals to cluster frame
 cluster_frame <- merge(cluster_frame,sim_pop_long[,.N,cluster],by='cluster')
 
-# objects for sampling ---------
+# (RANDOM) objects for sampling ---------
 # average number of individuals to sample from each cluster 
 # n_per_EA <- 10
 #cluster_frame$n <-  rnbinom(nrow(cluster_frame),size=10,mu = n_per_EA) + 1 #number that will be sampled from that cluster if sampled
@@ -217,22 +231,33 @@ cluster_frame <- merge(cluster_frame,cluster_alloc,by=c('admin1','NAME_1','urban
   mutate(wt = strata_total/(EAs*n)/1e3,
          wt_reenum = (N*sum(N_list))/(N_list*EAs*n)/1e3) # inclusion probability of cluster
 
-# get population urban rural percent for weights
+# (RANDOM) global simulation parameters ------
 
-# helper function ----------
+#sig_u <- c(sqrt(0.1),sqrt(0.05))
+sig_u <- c(sqrt(0.2),sqrt(0.05))
+phi <- c(0.75,0.75)
 
-## admin2
-admin2.HT.withNA <- function(which.area) {
-  admin2 <- NULL
-  tmp <- subset(my.svydesign, (admin2 == as.character(which.area)))
-  
-  if (dim(tmp)[1] == 0) {
-    return(c(which.area,rep(NA, 2)))
-  } else {
-    lm.ob <- survey::svymean(value ~ 1, design = tmp)
-    return(c(which.area, lm.ob[1], vcov(lm.ob)))
-  }
-}
+W1 <- sig_u[1]^2*((1-phi[1])*diag(1,n_admin2) + phi[1]*Q2_scaled_inv)
+W2 <- sig_u[2]^2*((1-phi[2])*diag(1,n_admin2) + phi[2]*Q2_scaled_inv)
+
+mean_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
+var_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2))
+
+# KEEP ABOVE SAME ACROSS SETTINGS ------
+
+setwd("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations")
+
+# load(file="popdata.rda")
+# load(file="cluster_frame.rda")
+# load(file="cluster_alloc.rda")
+# load(file="mean_random_effects.rda")
+# load(file="var_random_effects.rda")
+
+save(sim_pop_long,file="popdata.rda")
+save(cluster_frame,file="cluster_frame.rda")
+save(cluster_alloc,file="cluster_alloc.rda")
+save(mean_random_effects,file="mean_random_effects.rda")
+save(var_random_effects,file="var_random_effects.rda")
 
 # generate/load covariates ---------
 # use same simulated covariates across all settings
@@ -256,18 +281,6 @@ var_covariates <- c('X4','X5','X6')
 mean_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,mean_covariates])
 var_model_matrix <- cbind(rep(1,n_admin2),cmat_admin2[,var_covariates])
 
-# global simulation parameters ------
-
-sig_u <- c(sqrt(0.1),sqrt(0.05))
-phi <- c(0.75,0.75)
-#phi <- c(0,0)
-
-W1 <- sig_u[1]^2*((1-phi[1])*diag(1,n_admin2) + phi[1]*Q2_scaled_inv)
-W2 <- sig_u[2]^2*((1-phi[2])*diag(1,n_admin2) + phi[2]*Q2_scaled_inv)
-
-mean_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W1))
-var_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2))
-
 # simulation parameters which vary by setting -----
 # setting 1: default
 # setting 2: varying urban mean and variance effects
@@ -277,7 +290,7 @@ var_random_effects <- as.vector(Rfast::rmvnorm(1,rep(0,n_admin2),W2))
 # setting 6: urban oversample
 # setting 7: reenumeration
 
-setting <- 7
+for(setting in c(1:5,7)){
 
 cluster_frame <- as.data.table(cluster_frame)
 if(setting == 4){
@@ -328,16 +341,16 @@ params <- list(sig2 = sig2,
                gamma = gamma,
                admin2_mean = admin2_mean,
                admin2_strata_mean = admin2_strata_mean,
-               sig_u = sig_u,
-               phi = phi)
+               sig_u = c(sqrt(0.1),sqrt(0.05)),
+               phi = c(0.75,0.75))
 
 ## check
 # plot(admin2_mean,sim_pop_long[order(admin2),mean(value),by=admin2]$V1)
 # abline(0,1)
 
 # take sample and get direct estimates --------
-direct <- sampled_clusters <- true_vals <- list()
-for(k in 1:100){
+direct_all <- sampled_clusters <- list()
+for(k in 1:10000){
   
   cat(k,'\n')
 
@@ -361,10 +374,6 @@ for(k in 1:100){
     sampled_clusters[[k]] <- sim_sample %>% group_by(admin1,admin2,urban,strata,cluster) %>% reframe(n=n(),wt=unique(wt))
   }
 
-  # true_vals[[k]] <- list(sig2 = sig2,
-  #                        admin2_mean = admin2_mean,
-  #                        admin2_strata_mean = admin2_strata_mean)
-
   if(setting == 7){
     my.svydesign <- survey::svydesign(ids = stats::formula("~cluster"),strata = ~strata,
                                       weights = ~wt_reenum, data = sim_sample)
@@ -376,7 +385,7 @@ for(k in 1:100){
   x <- mapply(admin2.HT.withNA, which.area = 1:n_admin2)
   admin.dir <- data.frame(t(x))
   colnames(admin.dir) <- c('admin2','mean','variance')
-  direct[[k]] <- admin.dir
+  direct_all[[k]] <- admin.dir
 }
 
 # save all the relevant objects -------
@@ -389,23 +398,22 @@ if(!dir.exists(folder)){
 }
 setwd(folder)
 
-sim_pop_long[,value:=NULL]
-save(sim_pop_long,file='popdata.rda')
+# sim_pop_long[,value:=NULL]
+# save(sim_pop_long,file='popdata.rda')
+# save(cluster_alloc,file='cluster_alloc.rda')
+# save(cluster_frame,file='cluster_frame.rda')
 save(cmat_admin2,file='cmat_admin2.rda')
-save(cluster_alloc,file='cluster_alloc.rda')
-save(cluster_frame,file='cluster_frame.rda')
 save(sampled_clusters,file='sampled_clusters.rda')
+save(direct_all,file='direct_all.rda')
+
+direct <- direct_all[1:100]
 save(direct,file='direct.rda')
-#save(true_vals,file='true_vals.rda')
 
 objects <- list(admin.key = admin.key,
-                nodes1 = nodes1,
                 nodes2 = nodes2,
-                car_scale1 = Q1_scaled[1,1]/Q.admin1[1,1],
-                car_scale2 = Q2_scaled[1,1]/Q.admin2[1,1],
-                A_2to1 = A_2to1)
+                car_scale2 = Q2_scaled[1,1]/Q.admin2[1,1])
 
 save(objects,file='objects.rda')
 save(params,file='params.rda')
 
-
+}

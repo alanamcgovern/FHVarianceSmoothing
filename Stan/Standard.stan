@@ -44,7 +44,7 @@ parameters {
   vector[m] u1;
   sum_to_zero_vector[m] s1_raw;
   real<lower=0> sig_u;
-  real<lower=0,upper=1> phi1;
+  real logit_phi1;
 }
 
 transformed parameters {
@@ -53,9 +53,11 @@ transformed parameters {
   vector[m] s1; // ICAR
   vector[m] b1;
   
+  real phi1 = inv_logit(logit_phi1);
+  
   // random effects:
+  s1 = s1_raw / sqrt(car_scale);   // BYM2 standardization
   if(bym2_mean==1){
-    s1 = s1_raw / sqrt(car_scale);   // BYM2 standardization
     b1 = sig_u*(sqrt(phi1)*s1 + sqrt(1-phi1)*u1);
   }else{
     b1 = sig_u*u1;
@@ -72,13 +74,13 @@ transformed parameters {
 // The model to be estimated.
 model {
   target += pc_sigma_lp(sig_u, 1, 0.01);
-  phi1 ~ beta(0.5,1);
+  
+  target += beta_lpdf(phi1 | 1, 2);           
+  target += log(phi1) + log1m(phi1);           // Jacobian of inv_logit transform
 
   u1 ~ normal(0,1);
 
-  if(bym2_mean==1){
-    target += icar_lp(s1_raw, node_1, node_2);
-  }
+  target += icar_lp(s1_raw, node_1, node_2);
   
   beta ~ normal(0, 2);
   y ~ normal(theta_data,sqrt(v_hat));

@@ -205,6 +205,8 @@ data_list = list(m=n_admin2,
                  node_2 = nodes2$node2,
                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1])
 
+start.time <- Sys.time()
+# 32 seconds
 fit0 <- mod_std$sample(
   data = data_list,
   chains = 4,
@@ -214,14 +216,27 @@ fit0 <- mod_std$sample(
   adapt_delta = 0.99,
   # show_messages = F,
   #  show_exceptions = F,
-  refresh=200)
+  refresh=00)
+Sys.time() - start.time
 
 theta_fit <- as.matrix(unclass(fit0$draws(variables = c("theta"), format = "matrix")))
 standard_res <- data.frame(area = 1:n_admin2,
                        model = 'Standard',
                        mean = apply(theta_fit,2,mean),
+                       sd = apply(theta_fit,2,sd),
                        upper = apply(theta_fit,2,quantile,probs=0.95),
                        lower = apply(theta_fit,2,quantile,probs=0.05))
+
+ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
+prop_greater <- (ranks - 1) / n_admin2
+standard_res$lower.1 <- colMeans(prop_greater < 0.1)
+standard_res$lower.25 <- colMeans(prop_greater < 0.25)
+standard_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
+
+standard_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
+standard_res$less0 <- apply(theta_fit,2,function(x){mean(x < 0)})
+standard_res$lessneg1 <- apply(theta_fit,2,function(x){mean(x < -1)})
+
 
 # STANDARD FH for comparison (INLA) ------------
 
@@ -306,56 +321,13 @@ data_list = list(m=n_admin2,
                  node_2 = nodes2$node2,
                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) 
 
-### with BYM2 and covariates ------------
-data_list$bym2_var <- 1
-data_list$p_var = ncol(var_model_matrix)
-data_list$Z = var_model_matrix
-
-# 38.6 seconds
-fit1 <- mod_naive$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  adapt_delta = 0.99,
- # show_messages = F,
-#  show_exceptions = F,
-  refresh=200)
-
-theta_fit <- as.matrix(unclass(fit1$draws(variables = c("theta"), format = "matrix")))
-mod1_res <- data.frame(area = 1:n_admin2,
-                        model = 'Mod1',
-                        mean = apply(theta_fit,2,mean),
-                        upper = apply(theta_fit,2,quantile,probs=0.95),
-                        lower = apply(theta_fit,2,quantile,probs=0.05))
-
-ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
-prop_greater <- (ranks - 1) / n_admin2
-mod1_res$lower.1 <- colMeans(prop_greater < 0.1)
-mod1_res$lower.25 <- colMeans(prop_greater < 0.25)
-mod1_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
-
-## diagnostics
-summary_df <- fit1$summary()
-diag_df <- fit1$diagnostic_summary()
-
-mod1_diag <- data.frame(model = 'Mod1',
-                         divergences = sum(diag_df$num_divergent),
-                         max_treedepth = sum(diag_df$num_max_treedepth),
-                         min_efbmi = min(diag_df$ebfmi),
-                         max_rhat = max(summary_df$rhat,na.rm=T),
-                         bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
-                         tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
-rm(fit1)
-rm(theta_fit)
-
 ### with BYM2 and no covariates ------------
 data_list$bym2_var <- 1
 data_list$p_var = 1
 data_list$Z = cbind(rep(1,n_admin2))
 
 # 29 seconds
+start.time <- Sys.time()
 fit1b <- mod_naive$sample(
   data = data_list,
   chains = 4,
@@ -366,6 +338,7 @@ fit1b <- mod_naive$sample(
   # show_messages = F,
   #  show_exceptions = F,
   refresh=200)
+Sys.time() - start.time
 
 theta_fit <- as.matrix(unclass(fit1b$draws(variables = c("theta"), format = "matrix")))
 mod1b_res <- data.frame(area = 1:n_admin2,
@@ -397,47 +370,6 @@ mod1b_diag <- data.frame(model = 'Mod1b',
                         tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
 
 rm(fit1b)
-rm(theta_fit)
-
-### with IID and no covariates (except urban prop) -------
-
-data_list$bym2_var <- 0
-data_list$p_var = 2
-data_list$Z = cbind(rep(1,n_admin2),var_model_matrix[,c('urb_frac')])
-
-# 22.4 s
-fit2 <- mod_naive$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  adapt_delta = 0.99,
- # show_messages = F,
-#  show_exceptions = F,
-  refresh=200)
-
-
-theta_fit <- as.matrix(unclass(fit2$draws(variables = c("theta"), format = "matrix")))
-mod1a_res <- data.frame(area = 1:n_admin2,
-                     model = 'Mod1a',
-                     mean = apply(theta_fit,2,mean),
-                     upper = apply(theta_fit,2,quantile,probs=0.95),
-                     lower = apply(theta_fit,2,quantile,probs=0.05))
-
-## diagnostics
-summary_df <- fit2$summary()
-diag_df <- fit2$diagnostic_summary()
-
-mod1a_diag <- data.frame(model = 'Mod1a',
-                     divergences = sum(diag_df$num_divergent),
-                     max_treedepth = sum(diag_df$num_max_treedepth),
-                     min_efbmi = min(diag_df$ebfmi),
-                     max_rhat = max(summary_df$rhat,na.rm=T),
-                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
-                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
-
-rm(fit2)
 rm(theta_fit)
 
 # SASW distribution models ---------------------------------
@@ -541,51 +473,6 @@ for(a in sort(sample(data_areas,8))){
   abline(0,1)
 }
 
-### fit with BYM2 and covariates -----------
-
-data_list$p_var = ncol(var_model_matrix)
-data_list$Z = var_model_matrix
-data_list$bym2_var = 1
-
-# 109.2 s
-fit3 <- mod_sasw$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  adapt_delta = 0.99,
- # show_messages = F,
-#  show_exceptions = F,
-  refresh=100)
-
-theta_fit <- as.matrix(unclass(fit3$draws(variables = c("theta"), format = "matrix")))
-mod2_res <- data.frame(area = 1:n_admin2,
-                     model = 'Mod2',
-                     mean = apply(theta_fit,2,mean),
-                     upper = apply(theta_fit,2,quantile,probs=0.95),
-                     lower = apply(theta_fit,2,quantile,probs=0.05))
-
-ranks <- t(apply(theta_fit, 1, rank, ties.method = "average"))
-prop_greater <- (ranks - 1) / n_admin2
-mod2_res$lower.1 <- colMeans(prop_greater < 0.1)
-mod2_res$lower.25 <- colMeans(prop_greater < 0.25)
-mod2_res$stunt <- apply(theta_fit,2,function(x){mean(x < -2)})
-
-summary_df <- fit3$summary()
-diag_df    <- fit3$diagnostic_summary()
-
-mod2_diag <- data.frame(model = 'Mod2',
-                     divergences = sum(diag_df$num_divergent),
-                     max_treedepth = sum(diag_df$num_max_treedepth),
-                     min_efbmi = min(diag_df$ebfmi),
-                     max_rhat = max(summary_df$rhat,na.rm=T),
-                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
-                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
-
-rm(theta_fit)
-rm(fit3)
-
 ### fit with BYM2 and no covariates -----------
 
 data_list$p_var = 1
@@ -593,6 +480,7 @@ data_list$Z = cbind(rep(1,n_admin2))
 data_list$bym2_var = 1
 
 # 69 s
+start.time <- Sys.time()
 fit3 <- mod_sasw$sample(
   data = data_list,
   chains = 4,
@@ -603,6 +491,12 @@ fit3 <- mod_sasw$sample(
   # show_messages = F,
   #  show_exceptions = F,
   refresh=100)
+Sys.time() - start.time
+
+delta_fit <- as.matrix(unclass(fit3$draws(variables = c("delta"), format = "matrix")))
+beta_fit <- as.matrix(unclass(fit3$draws(variables = c("beta"), format = "matrix")))
+
+apply(beta_fit,2,quantile,probs=c(0.05,0.5,0.95))
 
 theta_fit <- as.matrix(unclass(fit3$draws(variables = c("theta"), format = "matrix")))
 mod2b_res <- data.frame(area = 1:n_admin2,
@@ -634,47 +528,11 @@ mod2b_diag <- data.frame(model = 'Mod2b',
 rm(fit3)
 rm(theta_fit)
 
-### fit with IID and no covariates (except urban prop) -----------
-
-data_list$p_var = 2
-data_list$Z = cbind(rep(1,n_admin2),var_model_matrix[,c('urb_frac')])
-data_list$bym2_var = 0
-
-# 63.5 s
-fit4 <- mod_sasw$sample(
-  data = data_list,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  adapt_delta = 0.99,
- # show_messages = F,
-#  show_exceptions = F,
-  refresh=100)
-
-theta_fit <- as.matrix(unclass(fit4$draws(variables = c("theta"), format = "matrix")))
-mod2a_res <- data.frame(area = 1:n_admin2,
-                     model = 'Mod2a',
-                     mean = apply(theta_fit,2,mean),
-                     upper = apply(theta_fit,2,quantile,probs=0.95),
-                     lower = apply(theta_fit,2,quantile,probs=0.05))
-
-summary_df <- fit4$summary()
-diag_df <- fit4$diagnostic_summary()
-
-mod2a_diag <- data.frame(model = 'Mod2a',
-                     divergences = sum(diag_df$num_divergent),
-                     max_treedepth = sum(diag_df$num_max_treedepth),
-                     min_efbmi = min(diag_df$ebfmi),
-                     max_rhat = max(summary_df$rhat,na.rm=T),
-                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
-                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail)
-
-rm(fit4)
+phi <- as.matrix(unclass(fit3$draws(variables = c("phi1",'phi2'), format = "matrix")))
 
 # COMBINE AND SAVE MODELS ----------
 
-mods_res <- rbind(std.res[,c('area','model','mean','sd','upper','lower','lower.1','lower.25','stunt','less0','lessneg1')],
+mods_res <- rbind(standard_res[,c('area','model','mean','sd','upper','lower','lower.1','lower.25','stunt','less0','lessneg1')],
                   mod1b_res,
                   #mod1a_res,
                   mod2b_res)
@@ -695,9 +553,9 @@ mods_res <- mods_res %>% mutate(ci.width = upper - lower) %>% rename(admin2 = ar
 # PLOTS ---------
 
 model_labs <- c(
-  Mod1b = "Simple",
-  Mod2b = "SASW",
-  std = "Standard")
+  Mod1b = "CSS",
+  Mod2b = "CSSW",
+  Standard = "Standard")
 
 ### assessing normality assumption -------
 hist(dir.dat$value)
@@ -801,63 +659,63 @@ top_row / bottom_row &
 
 lims <- range(mods_res$mean)
 
-m1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=mean)) +
+m1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Standard',]),aes(fill=mean)) +
   ggtitle('Standard') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 m2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=mean)) +
-  ggtitle('Simple') +
+  ggtitle('CSS') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 m3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=mean)) +
-  ggtitle('SASW') +
+  ggtitle('CSSW') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 
 row1 <- ggarrange(plotlist = list(m1,m2,m3),common.legend = T,nrow=1)
 
 lims <- range(mods_res$ci.width)
 
-v1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=ci.width)) +
+v1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Standard',]),aes(fill=ci.width)) +
   ggtitle('Standard') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
 v2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=ci.width)) +
-  ggtitle('Simple') +
+  ggtitle('CSS') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
 v3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=ci.width)) +
-  ggtitle('SASW') +
+  ggtitle('CSSW') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
 
 row2 <- ggarrange(plotlist = list(v1,v2,v3),common.legend = T,nrow=1)
 
+# 750 x 700
+ggarrange(row1,row2,ncol = 1)
+
 lims <- range(mods_res$lower.1)
 
-d1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=lower.1)) +
+d1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Standard',]),aes(fill=lower.1)) +
   ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
   theme(legend.position = 'none')
 
 d2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=lower.1)) +
-  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  ggtitle('CSS') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
   theme(legend.position = 'none')
 
 d3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lower.1)) +
-  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  ggtitle('CSSW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
   theme(legend.position = 'none')
 
 row3 <- ggarrange(plotlist = list(d1,d2,d3),nrow=1)
 
 lims <- range(mods_res$lower.25)
 
-q1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=lower.25)) +
+q1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Standard',]),aes(fill=lower.25)) +
   ggtitle('Standard') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
 q2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=lower.25)) +
-  ggtitle('Simple') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
+  ggtitle('CSS') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
 q3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lower.25)) +
-  ggtitle('SASW') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
+  ggtitle('CSSW') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
 row4 <- ggarrange(plotlist = list(q1,q2,q3),common.legend = T,nrow=1,legend = 'bottom')
-
-# 750 x 700
-ggarrange(row1,row2,ncol = 1)
 
 row3 <- annotate_figure(row3,
                         top = text_grob("Posterior probability of membership in lowest decile", 
@@ -867,7 +725,6 @@ row4 <- annotate_figure(row4,
                                         size = 16, hjust = 0, x = 0))
 ggarrange(row3,row4,ncol = 1,common.legend = T,heights = c(1,1.15))
 
-pdf('test.pdf')
 ## STUNTING (near 0)
 lims <- range(mods_res$stunt)
 
@@ -956,21 +813,19 @@ order_key <- tmp[,c('admin2','area_order')]
 
 mods_res <- merge(mods_res,order_key,by='admin2')
 
-
-
-
 mods_res <- mods_res %>% 
   mutate(special_areas = #ifelse(admin2 %in% c(90,200,217,218),1,
-                        ifelse(admin2 %in% mods_res[mods_res$model=='std' & mods_res$ci.width<0.15,]$admin2,1,
-                                ifelse(admin2 %in% mods_res[mods_res$model=='std' & mods_res$ci.width>1,]$admin2,2,0)))
+                        ifelse(admin2 %in% mods_res[mods_res$model=='Standard' & mods_res$ci.width<0.15,]$admin2,1,
+                                ifelse(admin2 %in% mods_res[mods_res$model=='Standard' & mods_res$ci.width>1,]$admin2,2,0)))
 # 700 x 740
 mods_res %>% ggplot() + 
   geom_segment(aes(x = area_order, xend = area_order, y=lower, yend = upper,colour = factor(special_areas)),lwd=0.5) + theme_bw() +
   geom_point(aes(area_order,mean),color='grey40',size=0.25)+ 
-  xlab('Second adminstrative area (ordered by mean estimate under Simple model)') + ylab('Height-for-age z-score') +
+  xlab('Second adminstrative area (ordered by mean estimate under CSS model)') + ylab('Height-for-age z-score') +
   scale_color_manual(values = c('0'='grey50','1'='purple3','2'='orange3')) +
   theme(axis.text.x = element_blank(),legend.position = 'none') +
   facet_wrap(~model,labeller=as_labeller(model_labs),nrow=3)
+
 
 # CALIBRATE parameters for simulations ----------
 

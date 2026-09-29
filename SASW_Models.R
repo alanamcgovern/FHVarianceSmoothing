@@ -11,19 +11,15 @@ args <- commandArgs(trailingOnly=TRUE)
 setting <- as.numeric(args[1])
 k <- as.numeric(args[2])
 
-mod1 <- cmdstan_model(stan_file = "Strat_noKappa.stan")
-#mod1 <- cmdstan_model(stan_file = "Stan/Strat_noKappa.stan")
+mod <- cmdstan_model(stan_file = "SASW.stan")
+#mod <- cmdstan_model(stan_file = "Stan/SASW.stan")
 
 setwd(paste0('Sim',setting))
 
 load(file='objects.rda')
 load(file='cmat_admin2.rda')
 load(file='sampled_clusters.rda')
-#load(file='cluster_frame.rda')
 load(file='direct.rda')
-
-#domain_probs <- cluster_frame[, .N, by = .(strata, admin2, urban)]
-#domain_probs[, prop := N / sum(N), by = strata]
 
 folders <- c('Mod2','Mod2a')
 for(f in folders){
@@ -57,15 +53,13 @@ q <- q_id <- nu <- NULL
 tol <- 1e-10
 for(area in data_areas){
   tmp_D <- sampled_clusters[[k]] %>% filter(admin2 == area) %>% group_by(urban) %>% summarise(N_D = n())
-#  if(sum(tmp_D$N_D>0)==2){
   
   tmp <- sampled_clusters[[k]] %>% filter(admin1 == admin.key[admin.key$admin2 == area,]$admin1) %>% arrange(urban)# %>% mutate(wt=wt/1e3)
   tmp$wt <- pmin(tmp$wt,quantile(tmp$wt,0.95))
   
- # omega_full <- tmp$n*tmp$wt
   tmp[tmp$admin2 != area,]$wt <- 0
   N <- c(sum(1-tmp$urban),sum(tmp$urban))
-
+  
   omega <- tmp$n*tmp$wt
   
   B_comps <- lapply(1:2,function(h){
@@ -90,7 +84,7 @@ for(area in data_areas){
   
   out <- eigen(A, symmetric = TRUE)
   V <- Li %*% out$vectors
-
+  
   keep_id <- which(out$values > tol)
   q_tmp <- out$values[keep_id]
   q_start[area] <- length(q) + 1
@@ -101,37 +95,32 @@ for(area in data_areas){
   nu <- c(nu,t(V)%*%tmp$urban)
   
   v_hat_scaled_exact[area] <- dir.dat$variance[area]*(t(omega)%*%S%*%omega)
-  
-#  p_h <- c(rep(domain_probs[admin2==area & urban== 0,]$prop,N[1]),rep(domain_probs[admin2==area & urban== 1,]$prop,N[2]))
-  
- # cons_exact[area] <- (t(omega_full)%*%diag(p_h)%*%S%*%omega_full)/sum(p_h*omega_full)^2
   cons_exact[area] <- (t(omega)%*%S%*%omega)/sum(omega)^2
- # }
 
 }
 
 data_areas <- which(!is.na(cons_exact))
 
 data_list = list(m=n_admin2,
-                       m_data=length(data_areas),
-                       data_areas = data_areas,
-                       y=dir.dat$mean[data_areas],
-                       v_hat_scaled = v_hat_scaled_exact[data_areas],
-                       Cons = cons_exact[data_areas],
-                       lenq = length(q),
-                       q_id = q_id,
-                       q_start = q_start[data_areas],
-                       q_per_area = as.vector(table(q_id)),
-                       q = q, nu = nu,
-                       p_mean = ncol(mean_model_matrix_admin2),
-                       X = mean_model_matrix_admin2,
-                       bym2_mean = 1,
-                       # all bym2 stuff
-                       N_edges = nrow(objects$nodes2),
-                       node_1 = objects$nodes2$node1,
-                       node_2 = objects$nodes2$node2,
-                       car_scale = objects$car_scale2,
-                       bias_adj = 0) 
+                 m_data=length(data_areas),
+                 data_areas = data_areas,
+                 y=dir.dat$mean[data_areas],
+                 v_hat_scaled = v_hat_scaled_exact[data_areas],
+                 Cons = cons_exact[data_areas],
+                 lenq = length(q),
+                 q_id = q_id,
+                 q_start = q_start[data_areas],
+                 q_per_area = as.vector(table(q_id)),
+                 q = q, nu = nu,
+                 p_mean = ncol(mean_model_matrix_admin2),
+                 X = mean_model_matrix_admin2,
+                 bym2_mean = 1,
+                 # all bym2 stuff
+                 N_edges = nrow(objects$nodes2),
+                 node_1 = objects$nodes2$node1,
+                 node_2 = objects$nodes2$node2,
+                 car_scale = objects$car_scale2,
+                 bias_adj = 0) 
 
 # fit with BYM2 and covariates -----------
 
@@ -139,7 +128,7 @@ data_list$p_var = ncol(var_model_matrix_admin2)
 data_list$Z = var_model_matrix_admin2
 data_list$bym2_var = 1
 
-fit1 <- mod1$sample(
+fit1 <- mod$sample(
   data = data_list,
   chains = 4,
   parallel_chains = 4,
@@ -182,20 +171,20 @@ write.csv(data.frame(sim=k,
                      model = 'Mod2',
                      df = colMeans(df_fit1),
                      scale = colMeans(scale_fit1)),
-                     file=paste0('Mod2/Hyper/Chisq_params',k,'.csv'))
+          file=paste0('Mod2/Hyper/Chisq_params',k,'.csv'))
 
 # diagnostics
 summary_df <- fit1$summary()
 diag_df    <- fit1$diagnostic_summary()
 
 write.csv(data.frame(sim=k,
-                model = 'Mod2',
-                divergences = sum(diag_df$num_divergent),
-                max_treedepth = sum(diag_df$num_max_treedepth),
-                min_efbmi = min(diag_df$ebfmi),
-                max_rhat = max(summary_df$rhat,na.rm=T),
-                bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
-                tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
+                     model = 'Mod2',
+                     divergences = sum(diag_df$num_divergent),
+                     max_treedepth = sum(diag_df$num_max_treedepth),
+                     min_efbmi = min(diag_df$ebfmi),
+                     max_rhat = max(summary_df$rhat,na.rm=T),
+                     bulk_ess = summary_df[summary_df$variable=='lp__',]$ess_bulk,
+                     tail_ess = summary_df[summary_df$variable=='lp__',]$ess_tail),
           file=paste0('Mod2/Diagnostic/Diag_Summary_',k,'.csv'))
 
 prob_params <- summary_df %>% filter((!is.na(rhat) & rhat > 1.01) | ess_bulk < 400 | ess_tail < 100)
@@ -205,15 +194,13 @@ if(nrow(prob_params)>0){
 
 rm(fit1,theta_fit1,v_fit1,hyper_fit1)
 
-
-
 # fit with IID and no covariates (except urban prop) -----------
 
 data_list$p_var = 2
 data_list$Z = cbind(rep(1,n_admin2),cmat_admin2[,c('urb_frac')])
 data_list$bym2_var = 0
 
-fit2 <- mod1$sample(
+fit2 <- mod$sample(
   data = data_list,
   chains = 4,
   parallel_chains = 4,

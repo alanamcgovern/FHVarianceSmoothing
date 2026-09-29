@@ -142,6 +142,36 @@ m3 <- dist_metrics_full %>% group_by(setting_labels,area) %>%
 ggarrange(plotlist = list(m1,m3), nrow=2, common.legend = T, legend='bottom')
 
 
+########## ACCURACY OF EMPIRICAL DESIGN VARIANCE ----------
+
+mc_boot <- NULL
+for(setting in c(1:5)){
+  setwd(paste0('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim',setting))
+  
+  load(file=paste0('params.rda'))
+  load(file=paste0('objects.rda'))
+  load(file=paste0('direct.rda'))
+  load(file=paste0('sampled_clusters.rda'))
+  n_admin2 <- length(params$admin2_mean)
+  
+  mc_err <- sapply(1:n_admin2, function(i){
+  m_tmp <- unlist(lapply(direct, function(x){x$mean[i]}))
+  m_tmp <- m_tmp[!is.na(m_tmp)]
+  sd(replicate(1000,var(sample(m_tmp,length(m_tmp),replace=T))))
+  })
+  adm2.dir.variance <- sapply(1:n_admin2, function(i){var(unlist(lapply(direct, function(x){x$mean[i]})),na.rm = T)})
+  
+  mc_boot <- rbind(mc_boot, data.frame(setting = setting, 
+                                       area = 1:n_admin2,
+                                       mc_err, 
+                                       adm2.dir.variance,
+                                       cv = mc_err/adm2.dir.variance))
+}
+
+mc_boot %>% ggplot + geom_boxplot(aes(x=setting, y=100*cv, group=setting)) +
+                                  ggtitle('Scaled Monte Carlo error of V_i by area and setting') +
+                                  ylab('Percent error')
+
 ############ MODEL PERFORMANCE -------------------------------
 
 df_metrics <- var.results <- sig2.results <- NULL
@@ -189,35 +219,42 @@ for(setting in c(1:7)){
   df_metrics_tmp$setting <- setting
   df_metrics <- rbind(df_metrics,df_metrics_tmp)
   
-  # design variance estimates
-  var.results_tmp <- read.csv('Summary_Var.csv')
-  standard_est <- lapply(1:100,function(k){
-    tmp <- direct[[k]][,c('admin2','variance')] %>% rename(mean=variance,area=admin2)
+  # variance estimation
+  
+  ### combine design variance estimates 
+  var.results_tmp <- read.csv('Summary_Var.csv') %>% rename(v_est = mean)
+  standard_est <- lapply(length(direct),function(k){
+    tmp <- direct[[k]][,c('admin2','variance')] %>% rename(v_est=variance,area=admin2)
     tmp$sim <- k
     return(tmp)
   })
   standard_est <- do.call('rbind',standard_est)
-  standard_est <- standard_est[!is.na(standard_est$mean),]
-  standard_est <- standard_est[standard_est$mean > 1e-10,]
+  standard_est <- standard_est[!is.na(standard_est$v_est),]
+  standard_est <- standard_est[standard_est$v_est > 1e-10,]
   standard_est$model <- 'std'
-  var.results_tmp <- rbind(var.results_tmp,standard_est[,c('sim','area','model','mean')])
-  var.results_tmp$true_var <- adm2.dir.variance[var.results_tmp$area]
-  var.results_tmp$setting <- setting
+  var.results_tmp <- rbind(var.results_tmp,standard_est[,c('sim','area','model','v_est')])
   
-  var.results <- rbind(var.results,var.results_tmp)
-  
+  ### add sigma2 estimates
   hyper.results <- read.csv('Summary_hyper.csv')
   sig2.results_tmp <- hyper.results %>% filter(str_detect(hyper.results$param,'sig2')) %>% mutate(mean = exp(mean))
   sig2.results_tmp$area <- as.numeric((gsub("log_sig2\\[|\\]", "",sig2.results_tmp$X)))
-  sig2.results_tmp$true_value <- params$sig2_pop[sig2.results_tmp$area]
-  sig2.results_tmp$setting <- setting
+  sig2.results_tmp <- sig2.results_tmp[,c('sim','area','model','mean')] %>% rename(sig2_est = mean)
   
-  load('var_constants.rda')
-  sig2.results_tmp <- left_join(sig2.results_tmp,var_constants,by=c('sim','area'))
-  sig2.results_tmp <- sig2.results_tmp %>% mutate(cons = ifelse(model %in% c('Mod1','Mod1a'),cons_naive,cons_exact))
+  var.results_tmp <- merge(var.results_tmp,sig2.results_tmp,by=c('sim','area','model'),all=T)
   
-  sig2.results <- rbind(sig2.results,sig2.results_tmp[,c('sim','area','model','mean','true_value','cons','setting')])
+  ### back calculate constant
+  var.results_tmp$cons <- var.results_tmp$v_est/var.results_tmp$sig2_est
   
+  ### add true values
+  var.results_tmp$sig2_truth <- params$sig2_pop[var.results_tmp$area]
+  var.results_tmp$v_truth <- adm2.dir.variance[var.results_tmp$area]
+  
+  ### add theoretical variance
+  var.results_tmp$v_theo <- var.results_tmp$sig2_truth*var.results_tmp$cons
+  
+  var.results_tmp$setting <- setting
+  var.results <- rbind(var.results,var.results_tmp)
+
 }
 
 # chisq param estiamtes

@@ -62,8 +62,8 @@ parameters {
   sum_to_zero_vector[m] s1_raw;
   sum_to_zero_vector[m] s2_raw;
   vector<lower=0>[2] sig_u;
-  real<lower=0,upper=1> phi1;
-  real<lower=0,upper=1> phi2;
+  real logit_phi1;
+  real logit_phi2;
 }
 
 transformed parameters {
@@ -72,24 +72,25 @@ transformed parameters {
   vector[m_data] theta_data;
   vector<lower=0>[m_data] v_data;
   vector<lower=0>[m_data] v_raw;
-  vector[m] s1; // ICAR
-  vector[m] s2; // ICAR
   vector[m] b1;
   vector[m] b2;
   vector[lenq] delta;
   matrix[m_data,2] Q;
   vector<lower=0.999>[m_data] df;
   
+  real phi1 = inv_logit(logit_phi1);
+  real phi2 = inv_logit(logit_phi2);
+  vector[m] s1 = s1_raw / sqrt(car_scale);   // BYM2 standardization
+  vector[m] s2 = s2_raw / sqrt(car_scale);   // BYM2 standardization
+  
   // random effects:
   if(bym2_mean==1){
-    s1 = s1_raw / sqrt(car_scale);   // BYM2 standardization
     b1 = sig_u[1]*(sqrt(phi1)*s1 + sqrt(1-phi1)*u1);
   }else{
     b1 = sig_u[1]*u1;
   }
   
   if(bym2_var==1){ // which scale to use for BYM2?
-    s2 = s2_raw / sqrt(car_scale);   // BYM2 standardization
     b2 = sig_u[2]*(sqrt(phi2)*s2 + sqrt(1-phi2)*u2);
   }else{
     b2 = sig_u[2]*u2;
@@ -122,27 +123,20 @@ model {
   target += pc_sigma_lp(sig_u[1], 1, 0.01);
   target += pc_sigma_lp(sig_u[2], 1, 0.01);
   
-  phi1 ~ beta(0.5,1);
-  phi2 ~ beta(0.5,1);
+  target += beta_lpdf(phi1 | 1, 2);           
+  target += log(phi1) + log1m(phi1);           // Jacobian of inv_logit transform
+  target += beta_lpdf(phi2 | 1, 2);           
+  target += log(phi2) + log1m(phi2);           // Jacobian of inv_logit transform
   
   u1 ~ normal(0,1);
   u2 ~ normal(0,1);
   
-  if(bym2_mean==1){
-    target += icar_lp(s1_raw, node_1, node_2);
-  }
-  
-  if(bym2_var==1){
-    target += icar_lp(s2_raw, node_1, node_2);
-  }
+  target += icar_lp(s1_raw, node_1, node_2);
+  target += icar_lp(s2_raw, node_1, node_2);
   
   beta ~ normal(0, 2);
-  
-  gamma[1] ~ normal(0.5, 0.5);
-  if(p_var>1){
-     gamma[2:p_var] ~ normal(0,1);
-  }
- 
+  gamma ~ normal(0, 1);
+
   v_raw ~ gamma(0.5*df,0.5);
   y ~ normal(theta_data,sqrt(v_data));
 
