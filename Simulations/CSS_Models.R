@@ -1,4 +1,4 @@
-## fit Simple smoothing model:
+## fit CSS smoothing model:
 # does not account for sample weights and sizes or unplanned domain
 # only account for stratification in the mean and variance by including the urban proportion as a covariate in the latent layer
 
@@ -15,8 +15,8 @@ args <- commandArgs(trailingOnly=TRUE)
 setting <- as.numeric(args[1])
 k <- as.numeric(args[2])
 
-mod <- cmdstan_model(stan_file = "Simple.stan")
-##mod <- cmdstan_model(stan_file = "Stan/Simple.stan")
+mod <- cmdstan_model(stan_file = "CSS.stan")
+##mod <- cmdstan_model(stan_file = "Stan/CSS.stan")
 
 setwd(paste0('Sim',setting))
 
@@ -113,14 +113,16 @@ v_fit1 <- (as.matrix(unclass(fit1$draws(variables = c("v_data"), format = "matri
 write.csv(data.frame(sim=k,
                      area = data_areas,
                      model = 'Mod1',
-                     mean = apply(v_fit1,2,mean)),file=paste0('Mod1/Hyper/Var_Result',k,'.csv'))
+                     mean = apply(v_fit1,2,mean),
+                     median = apply(v_fit1,2,median)),file=paste0('Mod1/Hyper/Var_Result',k,'.csv'))
 
 hyper_fit1 <- as.matrix(unclass(fit1$draws(variables = c("log_sig2","beta",'gamma','sig_u','phi1','phi2'), format = "matrix")))
 
 write.csv(data.frame(sim=k,
                      model = 'Mod1',
                      param = colnames(hyper_fit1),
-                     mean = colMeans(hyper_fit1)),
+                     mean = colMeans(hyper_fit1),
+                     median = apply(hyper_fit1,2,median)),
           file=paste0('Mod1/Hyper/Hyper_Result',k,'.csv'))
 
 params_fit1 <- data.frame(sim=k,
@@ -181,14 +183,16 @@ v_fit1 <- (as.matrix(unclass(fit1$draws(variables = c("v_data"), format = "matri
 write.csv(data.frame(sim=k,
                      area = data_areas,
                      model = 'Mod1a',
-                     mean = apply(v_fit1,2,mean)),file=paste0('Mod1a/Hyper/Var_Result',k,'.csv'))
+                     mean = apply(v_fit1,2,mean),
+                     median = apply(v_fit1,2,median)),file=paste0('Mod1a/Hyper/Var_Result',k,'.csv'))
 
 hyper_fit1 <- as.matrix(unclass(fit1$draws(variables = c("log_sig2","beta",'gamma','sig_u','phi1','phi2'), format = "matrix")))
 
 write.csv(data.frame(sim=k,
                      model = 'Mod1a',
                      param = colnames(hyper_fit1),
-                     mean = colMeans(hyper_fit1)),
+                     mean = colMeans(hyper_fit1),
+                     median = apply(hyper_fit1,2,median)),
           file=paste0('Mod1a/Hyper/Hyper_Result',k,'.csv'))
 
 params_fit1 <- data.frame(sim=k,
@@ -222,9 +226,4 @@ if(nrow(prob_params)>0){
 rm(fit1,theta_fit1,v_fit1,hyper_fit1)
 
 
-median(v_fit1[,1])
-median(exp(hyper_fit1[,2]))
 
-exp(median(hyper_fit1[,2]))/(sum(N_D)*mean(tmp_D$n))
-
-median(exp(hyper_fit1[,2]))/(sum(N_D)*mean(tmp_D$n))

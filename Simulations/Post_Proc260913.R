@@ -74,10 +74,10 @@ sample_info %>% group_by(sim) %>% summarise(x = sum(m_u+m_r < 5)) %>% summarise(
 ########## ACCURACY OF APPROXIMATE DISTRIBUTIONS ----------------
 
 # from Comparison_Models.R
-load('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/approx_dist_metrics.rda') 
+load('/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/moments.rda') 
 
-model_labs <- c(c = 'SRS',b = "CSS", a = "CSSW", e='Empirical')
-model_colors <- c(c = 'firebrick',"b" = "#1f78b4", "a" = "#6a3d9a","e"="#A1D99B")
+model_labs <- c('draws_srs' = 'SRS','draws_CSS' = "CSS", 'draws_CSM' = "CSM", 'draws_emp'='Empirical')
+model_colors <- c('draws_srs' = 'firebrick','draws_CSS' = "#1f78b4", 'draws_CSM' = "#6a3d9a",'draws_emp'="#A1D99B")
 
 setting_key <- data.frame(setting = c(1:5),
                           setting_labels = c('1: correctly specified',
@@ -91,132 +91,98 @@ setting_levels <- c('1: correctly specified',
                     '3: t-distributed data',
                     '4: within cluster correlation')
 
-dist_metrics_full <- merge(setting_key,dist_metrics)
+first_moment <- merge(setting_key, moments_list[[1]])
+second_moment <- merge(setting_key, moments_list[[2]])
+third_moment <- merge(setting_key, moments_list[[3]])
 
-# 875 x 395
-dist_metrics_full %>% group_by(setting_labels,area) %>% 
-  summarise(b = mean(Wass_naive),a = mean(Wass_satt),c = mean(Wass_srs)) %>% 
-  pivot_longer(cols = c(b,a,c),names_to = 'model',values_to = 'mean_wass') %>%
-  ggplot(aes(model,mean_wass)) + 
-  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-  scale_y_continuous(trans='log',breaks = c(5e-4,0.001,0.0025,5e-3,0.01,0.025,0.05,0.1)) +
-  coord_cartesian(ylim = c(0.0005,0.25)) +
-  scale_fill_manual(name=expression(chi^2 ~ "distribution"),values = model_colors,labels=model_labs) + 
-  labs(x=NULL,y=NULL) + theme_bw() +
-  facet_wrap(~factor(setting_labels,
-                     levels = setting_levels),nrow=1) + 
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_text(size=8),
-        legend.position = 'bottom')# + 
-  ggtitle('A. Average Wasserstein distance of order 2')
-  
-#####
-  m2 <- dist_metrics_full %>% filter(setting ==1) %>% group_by(area) %>% 
-    summarise(e = mean(True_mean),
-              b = mean(naive_mean),
-              a = mean(satt_mean),
-              c = mean(srs_mean)) %>% 
-    pivot_longer(cols = c(a,b,c,e),names_to = 'model',values_to = 'mean_diff') %>%
-    ggplot(aes(model,mean_diff)) + 
+  m1 <- first_moment %>% filter(setting ==1) %>%
+    pivot_longer(cols = c(draws_srs,draws_CSS,draws_CSM,draws_emp),names_to = 'model',values_to = 'value') %>%
+    mutate(model = factor(model, levels = c('draws_srs', 'draws_CSS', 'draws_CSM', 'draws_emp'))) %>%
+    ggplot(aes(model,value)) + 
     geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
     scale_y_continuous(trans='log', breaks = c(0.005,0.01,0.025,0.05,0.1,0.2)) +
     scale_fill_manual(name = 'Distribution',values = model_colors,labels=model_labs) + 
     labs(x=NULL,y=NULL) + theme_bw() +
     theme(axis.text.x = element_blank(),
           axis.text.y = element_text(size=8)) +
-    ggtitle('A. Average mean')
+    ggtitle('A. Mean')
   
-  m3 <- dist_metrics_full %>% filter(setting ==1) %>% group_by(area) %>% 
-    summarise(e = mean(True_var),
-              b = mean(naive_var),
-              a = mean(satt_var),
-              c = mean(srs_var)) %>% 
-    pivot_longer(cols = c(a,b,c,e),names_to = 'model',values_to = 'var_diff') %>%
-    ggplot(aes(model,var_diff)) + 
+  m2 <- second_moment %>% filter(setting ==1) %>%
+    pivot_longer(cols = c(draws_srs,draws_CSS,draws_CSM,draws_emp),names_to = 'model',values_to = 'value') %>%
+    mutate(model = factor(model, levels = c('draws_srs', 'draws_CSS', 'draws_CSM', 'draws_emp'))) %>%
+    ggplot(aes(model,value)) + 
     geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
     scale_y_continuous(trans='log', breaks = c(1e-6,1e-5,1e-4,1e-3,1e-2)) +
-    scale_fill_manual(values = model_colors,labels=model_labs) + 
+    scale_fill_manual(name = 'Distribution',values = model_colors,labels=model_labs) + 
     labs(x=NULL,y=NULL) + theme_bw() +
     theme(axis.text.x = element_blank(),
           axis.text.y = element_text(size=8)) +
-    ggtitle('B. Average variance')
+    ggtitle('B. Variance')
   
-  m4 <- dist_metrics_full %>% filter(setting ==1) %>% group_by(area) %>% 
-    summarise(e = mean(True_skew),
-              b = mean(naive_skew),
-              a = mean(satt_skew),
-              c = mean(srs_skew)) %>% 
-    pivot_longer(cols = c(a,b,c,e),names_to = 'model',values_to = 'skew_diff') %>%
-    ggplot(aes(model,skew_diff)) + 
+  m3 <- third_moment %>% filter(setting ==1) %>%
+    pivot_longer(cols = c(draws_srs,draws_CSS,draws_CSM,draws_emp),names_to = 'model',values_to = 'value') %>%
+    mutate(model = factor(model, levels = c('draws_srs', 'draws_CSS', 'draws_CSM', 'draws_emp'))) %>%
+    ggplot(aes(model,value)) + 
     geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-    scale_y_continuous(trans='log', breaks = c(0.25,0.5,1,2.5,5,10)) +
-    scale_fill_manual(values = model_colors,labels=model_labs) + 
+    scale_y_continuous(trans='log', breaks = c(1,2,5,10,20,50)) +
+    scale_fill_manual(name = 'Distribution',values = model_colors,labels=model_labs) + 
     labs(x=NULL,y=NULL) + theme_bw() +
     theme(axis.text.x = element_blank(),
           axis.text.y = element_text(size=8)) +
-    ggtitle('C. Average skewness')
+    ggtitle('C. Skewness')
   
   
-  # 875 x 395
-  ggarrange(plotlist = list(m2,m3,m4), ncol=3, common.legend = T, legend='bottom')
+  # 875 x 350
+  ggarrange(plotlist = list(m1,m2,m3), ncol=3, common.legend = T, legend='bottom')
   
   
 # appendix
 
-m2 <- dist_metrics_full %>% group_by(setting_labels,area) %>% 
-  summarise(e = mean(True_mean),
-            b = mean(naive_mean),
-            a = mean(satt_mean),
-            c = mean(srs_mean)) %>% 
-  pivot_longer(cols = c(a,b,c,e),names_to = 'model',values_to = 'mean_diff') %>%
-  ggplot(aes(model,mean_diff)) + 
-  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-  scale_y_continuous(trans='log', breaks = c(1e-3,2.5e-3,0.01,.025,0.1)) +
-  scale_fill_manual(name='Distribution',values = model_colors,labels=model_labs) + 
-  labs(x=NULL,y=NULL) + theme_bw() +
-  facet_wrap(~factor(setting_labels,
-                     levels = setting_levels),nrow=1) + 
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_text(size=8)) +
-  ggtitle('A. Average mean')
+  m1 <- first_moment %>% 
+    pivot_longer(cols = c(draws_srs,draws_CSS,draws_CSM,draws_emp),names_to = 'model',values_to = 'value') %>%
+    mutate(model = factor(model, levels = c('draws_srs', 'draws_CSS', 'draws_CSM', 'draws_emp'))) %>%
+    ggplot(aes(model,value)) + 
+    geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+    scale_y_continuous(trans='log', breaks = c(2e-3,5e-3,2e-2,5e-2,2e-1)) +
+    scale_fill_manual(name = 'Distribution',values = model_colors,labels=model_labs) + 
+    labs(x=NULL,y=NULL) + theme_bw() +
+    facet_wrap(~factor(setting_labels,
+                       levels = setting_levels),nrow=1) + 
+    theme(axis.text.x = element_blank(),
+          axis.text.y = element_text(size=8)) +
+    ggtitle('A. Mean')
 
-m3 <- dist_metrics_full %>% group_by(setting_labels,area) %>% 
-  summarise(e = mean(True_var),
-            b = mean(naive_var),
-            a = mean(satt_var),
-            c = mean(srs_var)) %>% 
-  pivot_longer(cols = c(a,b,c,e),names_to = 'model',values_to = 'var_diff') %>%
-  ggplot(aes(model,var_diff)) + 
-  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-  scale_y_continuous(trans='log', breaks = c(1e-8,1e-7,1e-6,1e-5,1e-4,1e-3,1e-2,.1)) +
-  scale_fill_manual(values = model_colors,labels=model_labs) + 
-  labs(x=NULL,y=NULL) + theme_bw() +
-  facet_wrap(~factor(setting_labels,
-                     levels = setting_levels),nrow=1) + 
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_text(size=8)) +
-  ggtitle('B. Average variance')
-
-m4 <- dist_metrics_full %>% group_by(setting_labels,area) %>% 
-  summarise(e = mean(True_skew),
-    b = mean(naive_skew),
-            a = mean(satt_skew),
-            c = mean(srs_skew)) %>% 
-  pivot_longer(cols = c(a,b,c,e),names_to = 'model',values_to = 'skew_diff') %>%
-  ggplot(aes(model,skew_diff)) + 
-  geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
-  scale_y_continuous(trans='log', breaks = c(0.1,0.25,1,2.5,10,25)) +
-  scale_fill_manual(values = model_colors,labels=model_labs) + 
-  labs(x=NULL,y=NULL) + theme_bw() +
-  facet_wrap(~factor(setting_labels,
-                     levels = setting_levels),nrow=1) + 
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_text(size=8)) +
-  ggtitle('C. Average skewness')
+  m2 <- second_moment %>% 
+    pivot_longer(cols = c(draws_srs,draws_CSS,draws_CSM,draws_emp),names_to = 'model',values_to = 'value') %>%
+    mutate(model = factor(model, levels = c('draws_srs', 'draws_CSS', 'draws_CSM', 'draws_emp'))) %>%
+    ggplot(aes(model,value)) + 
+    geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+    scale_y_continuous(trans='log', breaks = c(1e-8,1e-6,1e-4,1e-2)) +
+    scale_fill_manual(name = 'Distribution',values = model_colors,labels=model_labs) + 
+    labs(x=NULL,y=NULL) + theme_bw() +
+    facet_wrap(~factor(setting_labels,
+                       levels = setting_levels),nrow=1) + 
+    theme(axis.text.x = element_blank(),
+          axis.text.y = element_text(size=8)) +
+    ggtitle('B. Variance')
+  
+  m3 <- third_moment %>% 
+    pivot_longer(cols = c(draws_srs,draws_CSS,draws_CSM,draws_emp),names_to = 'model',values_to = 'value') %>%
+    mutate(model = factor(model, levels = c('draws_srs', 'draws_CSS', 'draws_CSM', 'draws_emp'))) %>%
+    ggplot(aes(model,value)) + 
+    geom_boxplot(aes(fill=model),outlier.size = 0.15, median.linewidth = 0.5,box.linewidth = 0.25,whisker.linewidth = 0.25) + 
+    scale_y_continuous(trans='log', breaks = c(0.5,2,5,20,50)) +
+    scale_fill_manual(name = 'Distribution',values = model_colors,labels=model_labs) + 
+    labs(x=NULL,y=NULL) + theme_bw() +
+    facet_wrap(~factor(setting_labels,
+                       levels = setting_levels),nrow=1) + 
+    theme(axis.text.x = element_blank(),
+          axis.text.y = element_text(size=8)) +
+    ggtitle('C. Skewness')
 
 
-# 940 x 505
-ggarrange(plotlist = list(m2,m3,m4), nrow=3, common.legend = T, legend='bottom')
+# 950 x 615
+ggarrange(plotlist = list(m1,m2,m3), nrow=3, common.legend = T, legend='bottom')
 
 
 ########## ACCURACY OF EMPIRICAL DESIGN VARIANCE ----------
@@ -362,9 +328,9 @@ var.results <- merge(var.results,setting_key)
 
 model_labs <- c(
   Mod1 = "CSS-struct",
-  Mod2 = "CSSW-struct",
+  Mod2 = "CSM-struct",
   Mod1a = "CSS-unstruct",
-  Mod2a = "CSSW-unstruct",
+  Mod2a = "CSM-unstruct",
   Mod3 = "SRS-struct",
   Mod3a = "SRS-unstruct",
   Mod0_oracle = "Oracle",

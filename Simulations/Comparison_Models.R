@@ -222,7 +222,7 @@ for(k in 1:100){
                                     cons_exact = t(cons_tmp)[,2]))
 }
 
-# summarise accuracy of naive and sw distributions for each area x sim -------
+# DEP summarise accuracy of naive and sw distributions for each area x sim -------
 
 tol <- 1e-10
 probs <- seq(0.01, 0.99, 0.01)
@@ -378,6 +378,148 @@ colnames(dist_metrics)[1:22] <- c('True_mean','True_var','True_skew','True_media
 setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations"))
 
 save(dist_metrics, file = 'approx_dist_metrics.rda')
+
+# get moments of empirical and sampling dists -------------
+
+tol <- 1e-10
+n_admin2 <- 300
+
+dist_mean <- dist_var <- dist_skew <- NULL
+for(setting in 1:5){
+  cat(setting,'\n')
+  setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations/Sim",setting))
+  
+  load(file=paste0('direct_all.rda'))
+  load(file=paste0('objects.rda'))
+  load(file=paste0('params.rda'))
+  load(file=paste0('sampled_clusters.rda'))
+  
+  truth_mat <- sapply(direct_all, function(x) x$var)   # n_admin2 x length(direct)
+  
+  # admin2 -> admin1 lookup as a vector instead of re-filtering admin.key each time
+  admin1_lookup <- objects$admin.key$admin1[match(seq_len(nrow(truth_mat)), objects$admin.key$admin2)]
+  
+  moments_list <- lapply(1:n_admin2,function(area){
+    
+    draws_tmp <- lapply(1:1000,function(k){
+      dir.dat <- direct_all[[k]]
+      
+      change_id <- which(dir.dat$variance < 1e-5)
+      if (length(change_id) > 0) {
+        dir.dat[change_id, c("variance", "mean")] <- NA
+      }
+      
+      data_areas <- which(!is.na(dir.dat$mean))
+      
+      # split once per k instead of filter()-ing per area
+      sc_k <- sampled_clusters[[k]]
+      split_admin2 <- split(sc_k, sc_k$admin2)
+      split_admin1 <- split(sc_k, sc_k$admin1)
+      
+      if(area %in% data_areas){
+        mu_diff <- params$admin2_strata_mean[area] - params$admin2_strata_mean[n_admin2 + area]
+        sig2_k <- params$sig2_pop[area]
+        
+        tmp_D <- split_admin2[[as.character(area)]]
+        N_D <- c(sum(1 - tmp_D$urban), sum(tmp_D$urban))
+        
+        # srs
+        df_srs <- sum(tmp_D$n) - 1
+        scale_srs <- sig2_k / (sum(tmp_D$n) * df_srs)
+        draws_srs <- scale_srs * rchisq(1e4, df_srs)
+        
+        # naive
+        df_naive <- pmax(1, sum(N_D) - sum(N_D > 0))
+        scale_naive <- sig2_k / (sum(N_D) * mean(tmp_D$n) * pmax(1, sum(N_D) - sum(N_D > 0)))
+        draws_naive <- scale_naive * rchisq(1e4, df_naive)
+        
+        base1 <- split_admin1[[as.character(admin1_lookup[area])]]
+        tmp <- base1[order(base1$urban), ]
+        tmp$wt <- pmin(tmp$wt, quantile(tmp$wt, 0.95))
+        tmp[tmp$admin2 != area, "wt"] <- 0
+        N <- c(sum(1 - tmp$urban), sum(tmp$urban))
+        
+        omega <- tmp$n * tmp$wt
+        
+        B_comps <- lapply(1:2, function(h) {
+          if (N[h] > 0) {
+            return(N[h] / (N[h] - 1) * (diag(1, N[h]) - 1 / N[h] * matrix(1, N[h], N[h])))
+          }
+        })
+        
+        which.not.null <- c(1:2)[!sapply(B_comps, is.null)]
+        B <- bdiag(B_comps[which.not.null])
+        W <- diag(omega) %*% (diag(1, sum(N)) - (rep(1, sum(N)) %*% t(omega)) / sum(omega))
+        C <- t(W) %*% B %*% W
+        S <- diag(1 / tmp$n)
+        
+        L <- chol(S)                          # S = L' L
+        Li <- backsolve(L, diag(nrow(S)))     # L^{-1}
+        
+        # Form scale-free matrix A = S^{1/2} C S^{1/2}
+        A <- t(L) %*% C %*% L
+        
+        out <- eigen(A, symmetric = TRUE)
+        V <- Li %*% out$vectors
+        
+        keep_id <- which(out$values > tol)
+        q <- out$values[keep_id]
+        
+        V <- V[, keep_id]
+        nu <- t(V) %*% tmp$urban
+        delta <- (nu * mu_diff)^2 / sig2_k
+        r <- length(keep_id)
+        
+        Q1 <- sum(q * (1 + delta))
+        Q2 <- sum(q^2 * (1 + 2 * delta))
+        
+        # satterthwaite
+        scale_satt <- sig2_k / sum(omega)^2 * Q2 / Q1
+        df_satt <- Q1^2 / Q2
+        
+        draws_satt <- scale_satt * rchisq(1e4, df_satt)
+        
+        return(cbind(draws_srs,draws_naive,draws_satt))
+      }else{
+        return(NULL)
+      }
+    })
+    
+    dv <- truth_mat[area, ]
+    dv <- dv[dv > 1e-5]
+    dv <- dv[!is.na(dv)]
+    
+    if(mean(unlist(lapply(draws_tmp,is.null)))>0.9){
+      dist_mean_tmp <- dist_var_tmp <- dist_skew_tmp <- NULL
+    }else{
+      dist_mean_tmp <- data.frame(setting = setting, area = area,
+                                  draws_emp = mean(dv),
+                                  t(apply(do.call('rbind',draws_tmp),2,mean)))
+      dist_var_tmp <- data.frame(setting = setting, area = area, 
+                                 draws_emp = var(dv),
+                                 t(apply(do.call('rbind',draws_tmp),2,var)))
+      dist_skew_tmp <- data.frame(setting = setting, area = area, 
+                                  draws_emp = moments::skewness(dv),
+                                  t(apply(do.call('rbind',draws_tmp),2,moments::skewness)))
+    }
+    
+    return(list(dist_mean_tmp,dist_var_tmp,dist_skew_tmp))
+    
+  })
+  
+  dist_mean_tmp <- do.call(rbind,lapply(moments_list,function(x){x[[1]]}))
+  dist_var_tmp <- do.call(rbind,lapply(moments_list,function(x){x[[2]]}))
+  dist_skew_tmp <- do.call(rbind,lapply(moments_list,function(x){x[[3]]}))
+  
+  dist_mean <- rbind(dist_mean,dist_mean_tmp)
+  dist_var <- rbind(dist_var,dist_var_tmp)
+  dist_skew <- rbind(dist_skew,dist_skew_tmp)
+}
+
+setwd(paste0("/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Simulations"))
+
+moments_list <- list(dist_mean,dist_var,dist_skew)
+save(moments_list, file = 'moments.rda')
 
 # what is Satterwhaite scale and df under correct parameters -------
 

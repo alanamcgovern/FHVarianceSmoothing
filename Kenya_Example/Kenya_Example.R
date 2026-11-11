@@ -289,29 +289,28 @@ test.fit <- inla(as.formula(formula_str),
                 family = "gaussian",
                 data = admin2.dir.stable)
 
-# NAIVE distribution models --------------
-mod_naive <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/Simple.stan")
+# CSS distribution models --------------
+mod_CSS <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/CSS.stan")
 
 data_areas <- which(!is.na(admin2.dir.stable$mean))
-Cons_naive <- scale_naive <- df_naive <- v_hat_scaled_naive <- rep(NA,n_admin2)
+Cons_CSS <- df_CSS <- v_hat_scaled_CSS <- rep(NA,n_admin2)
 
 for(area in data_areas){
   tmp_D <- dir.dat %>% filter(admin2==area) %>% group_by(urban,cluster) %>% summarise(n=n(),wt = unique(v005)/1e6)
   N_D <- c(sum(1-tmp_D$urban),sum(tmp_D$urban))
   
-  df_naive[area] <- pmax(1,sum(N_D) - sum(N_D>0))
-  v_hat_scaled_naive[area] <- admin2.dir.stable$variance[area]*pmax(1,sum(N_D) - sum(N_D>0))
-  Cons_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n))
-  scale_naive[area] <- 1/(sum(N_D)*mean(tmp_D$n)*pmax(1,sum(N_D) - sum(N_D>0)))
+  df_CSS[area] <- pmax(1,sum(N_D) - sum(N_D>0))
+  v_hat_scaled_CSS[area] <- admin2.dir.stable$variance[area]*pmax(1,sum(N_D) - sum(N_D>0))
+  Cons_CSS[area] <- 1/(sum(N_D)*mean(tmp_D$n))
 }
 
 data_list = list(m=n_admin2,
                  m_data=length(data_areas),
                  data_areas = data_areas,
                  y=admin2.dir.stable$mean[data_areas],
-                 v_hat_scaled = v_hat_scaled_naive[data_areas],
-                 df=df_naive[data_areas],
-                 Cons = Cons_naive[data_areas],
+                 v_hat_scaled = v_hat_scaled_CSS[data_areas],
+                 df=df_CSS[data_areas],
+                 Cons = Cons_CSS[data_areas],
                  p_mean = ncol(mean_model_matrix),
                  X = mean_model_matrix,
                  bym2_mean = 1,
@@ -328,7 +327,7 @@ data_list$Z = cbind(rep(1,n_admin2))
 
 # 29 seconds
 start.time <- Sys.time()
-fit1b <- mod_naive$sample(
+fit1b <- mod_CSS$sample(
   data = data_list,
   chains = 4,
   parallel_chains = 4,
@@ -372,8 +371,8 @@ mod1b_diag <- data.frame(model = 'Mod1b',
 rm(fit1b)
 rm(theta_fit)
 
-# SASW distribution models ---------------------------------
-mod_sasw <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/SASW.stan")
+# CSM distribution models ---------------------------------
+mod_CSM <- cmdstan_model(stan_file = "/Users/alanamcgovern/Desktop/Research/FHVariance_Smoothing/Stan/CSM.stan")
 
 data_areas <- which(!is.na(admin2.dir.stable$mean))
 cons_exact <- v_hat_scaled_exact <- q_start <- rep(NA,n_admin2)
@@ -481,7 +480,7 @@ data_list$bym2_var = 1
 
 # 69 s
 start.time <- Sys.time()
-fit3 <- mod_sasw$sample(
+fit3 <- mod_CSM$sample(
   data = data_list,
   chains = 4,
   parallel_chains = 4,
@@ -554,7 +553,7 @@ mods_res <- mods_res %>% mutate(ci.width = upper - lower) %>% rename(admin2 = ar
 
 model_labs <- c(
   Mod1b = "CSS",
-  Mod2b = "CSSW",
+  Mod2b = "CSM",
   Standard = "Standard")
 
 ### assessing normality assumption -------
@@ -666,7 +665,7 @@ m2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=
   ggtitle('CSS') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 m3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=mean)) +
-  ggtitle('CSSW') +
+  ggtitle('CSM') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 
 row1 <- ggarrange(plotlist = list(m1,m2,m3),common.legend = T,nrow=1)
@@ -680,7 +679,7 @@ v2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=
   ggtitle('CSS') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
 v3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=ci.width)) +
-  ggtitle('CSSW') +
+  ggtitle('CSM') +
   scale_fill_scico(name = 'Width of 90% credible intervals',palette = 'lajolla',direction = -1,limits = lims)
 
 row2 <- ggarrange(plotlist = list(v1,v2,v3),common.legend = T,nrow=1)
@@ -699,7 +698,7 @@ d2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=
   theme(legend.position = 'none')
 
 d3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lower.1)) +
-  ggtitle('CSSW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
+  ggtitle('CSM') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
   theme(legend.position = 'none')
 
 row3 <- ggarrange(plotlist = list(d1,d2,d3),nrow=1)
@@ -713,7 +712,7 @@ q2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=
   ggtitle('CSS') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
 q3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lower.25)) +
-  ggtitle('CSSW') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
+  ggtitle('CSM') + scale_fill_scico(name = 'Probability ',palette = 'devon',direction = -1,limits = lims)
 
 row4 <- ggarrange(plotlist = list(q1,q2,q3),common.legend = T,nrow=1,legend = 'bottom')
 
@@ -723,62 +722,9 @@ row3 <- annotate_figure(row3,
 row4 <- annotate_figure(row4,
                         top = text_grob("Posterior probability of membership in lowest quartile", 
                                         size = 16, hjust = 0, x = 0))
+
+# 750 x 700
 ggarrange(row3,row4,ncol = 1,common.legend = T,heights = c(1,1.15))
-
-## STUNTING (near 0)
-lims <- range(mods_res$stunt)
-
-s1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=stunt)) +
-  ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
-  theme(legend.position = 'none')
-
-s2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=stunt)) +
-  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
-  theme(legend.position = 'none')
-
-s3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=stunt)) +
-  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
-  theme(legend.position = 'none')
-
-print(ggarrange(plotlist = list(s1,s2,s3),common.legend = T,nrow=1,legend = 'bottom'))
-
-## HAZ < 0 (near 1)
-lims <- range(mods_res$less0)
-
-s1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=less0)) +
-  ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
-  theme(legend.position = 'none')
-
-s2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=less0)) +
-  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
-  theme(legend.position = 'none')
-
-s3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=less0)) +
-  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
-  theme(legend.position = 'none')
-
-print(ggarrange(plotlist = list(s1,s2,s3),common.legend = T,nrow=1,legend = 'bottom'))
-
-## HAZ < -1 
-lims <- range(mods_res$lessneg1)
-
-s1 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='std',]),aes(fill=lessneg1)) +
-  ggtitle('Standard') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims) +
-  theme(legend.position = 'none')
-
-s2 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod1b',]),aes(fill=lessneg1)) +
-  ggtitle('Simple') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
-  theme(legend.position = 'none')
-
-s3 <- clean_map_theme + geom_sf(data = merge(poly.adm2, mods_res[mods_res$model=='Mod2b',]),aes(fill=lessneg1)) +
-  ggtitle('SASW') + scale_fill_scico(name = '',palette = 'devon',direction = -1,limits = lims)+
-  theme(legend.position = 'none')
-
-
-print(ggarrange(plotlist = list(s1,s2,s3),common.legend = T,nrow=1,legend = 'bottom'))
-
-dev.off()
-
 
 ### model results scatter plots -------
 
@@ -825,6 +771,72 @@ mods_res %>% ggplot() +
   scale_color_manual(values = c('0'='grey50','1'='purple3','2'='orange3')) +
   theme(axis.text.x = element_blank(),legend.position = 'none') +
   facet_wrap(~model,labeller=as_labeller(model_labs),nrow=3)
+
+
+### compare priors ------
+
+# 950 x 650
+par(mfrow=c(2,3))
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Standard',]$mean,
+     mods_res_wideprior[mods_res_wideprior$model=='Standard',]$mean,cex=0.25,
+     xlab = 'Default priors',ylab='Wide priors',main = 'Standard')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod1b',]$mean,
+     mods_res_wideprior[mods_res_wideprior$model=='Mod1b',]$mean,cex=0.25,
+     xlab = 'Default priors',ylab='Wide priors',main = 'CSS')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod2b',]$mean,
+     mods_res_wideprior[mods_res_wideprior$model=='Mod2b',]$mean,cex=0.25,
+     xlab = 'Default priors',ylab='Wide priors',main = 'CSM')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Standard',]$mean,
+     mods_res_offcenter[mods_res_offcenter$model=='Standard',]$mean,cex=0.25,
+     xlab = 'Default priors',ylab='Off-center priors',main = 'Standard')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod1b',]$mean,
+     mods_res_offcenter[mods_res_offcenter$model=='Mod1b',]$mean,cex=0.25,
+     xlab = 'Default priors',ylab='Off-center priors',main = 'CSS')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod2b',]$mean,
+     mods_res_offcenter[mods_res_offcenter$model=='Mod2b',]$mean,cex=0.25,
+     xlab = 'Default priors',ylab='Off-center priors',main = 'CSM')
+abline(0,1)
+
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Standard',]$sd,
+     mods_res_wideprior[mods_res_wideprior$model=='Standard',]$sd,cex=0.25,
+     xlab = 'Default priors',ylab='Wide priors',main = 'Standard')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod1b',]$sd,
+     mods_res_wideprior[mods_res_wideprior$model=='Mod1b',]$sd,cex=0.25,
+     xlab = 'Default priors',ylab='Wide priors',main = 'CSS')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod2b',]$sd,
+     mods_res_wideprior[mods_res_wideprior$model=='Mod2b',]$sd,cex=0.25,
+     xlab = 'Default priors',ylab='Wide priors',main = 'CSM')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Standard',]$sd,
+     mods_res_offcenter[mods_res_offcenter$model=='Standard',]$sd,cex=0.25,
+     xlab = 'Default priors',ylab='Off-center priors',main = 'Standard')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod1b',]$sd,
+     mods_res_offcenter[mods_res_offcenter$model=='Mod1b',]$sd,cex=0.25,
+     xlab = 'Default priors',ylab='Off-center priors',main = 'CSS')
+abline(0,1)
+
+plot(mods_res_oldpriors[mods_res_oldpriors$model=='Mod2b',]$sd,
+     mods_res_offcenter[mods_res_offcenter$model=='Mod2b',]$sd,cex=0.25,
+     xlab = 'Default priors',ylab='Off-center priors',main = 'CSM')
+abline(0,1)
 
 
 # CALIBRATE parameters for simulations ----------

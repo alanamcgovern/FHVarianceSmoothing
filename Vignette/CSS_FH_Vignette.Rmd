@@ -1,21 +1,21 @@
 ---
-title: "Appendix H: Implementation of simple variance smoothing Fay-Herriot model"
+title: "Appendix J: Implementation of CSS variance smoothing Fay-Herriot model"
 output: pdf_document
 ---
 
-In this vignette we define the simple variance smoothing Fay-Herriot model and use it to estimate height-for-age z-score Admin-2 means from the 2022 Kenya DHS. Note that this is model is specifically for continuous outcomes.
+In this vignette we define the Complex Sampling Single-$\chi^2$ (CSS) variance smoothing Fay-Herriot model and use it to estimate height-for-age z-score Admin-2 means from the 2022 Kenya DHS. Note that this is model is specifically for continuous outcomes.
 
 Let $\hat\theta_i$ and $\hat V_i$ denote the design-based mean and variance estimate for Admin-2 area $i=1,...,K$. Then the Fay-Herriot model is defined by
 
-$$\hat{\theta}_i \mid \theta_i, \sigma_i^2 \sim \mathcal{N}(\theta_i, v_i(\sigma_i^2)),\hspace{10mm} \hat{V}_i \mid \sigma_i^2 \sim \frac{v_i(\sigma_i^2)}{d_i} \chi^2_{d_i}$$
+$$\hat{\theta}_i \mid \theta_i, \sigma_i^2 \sim \mathcal{N}\left(\theta_i, \frac{\sigma_i^2}{n_i^+}\right),\hspace{10mm} \hat{V}_i \mid \sigma_i^2 \sim \frac{\sigma_i^2}{n_i^+\cdot d_i} \chi^2_{d_i}$$
 
-$$\theta_i = \boldsymbol{X}_i^T \boldsymbol{\beta} + b_i,\hspace{10mm} \log(\sigma_i^2) = \boldsymbol{Z}_i^T\boldsymbol{\eta} + e_i$$
+$$\theta_i = \boldsymbol{X}_i^T \boldsymbol{\beta} + b_i,\hspace{10mm} \log(\sigma_i^2) = \boldsymbol{Z}_i^T\boldsymbol{\eta} + g_i$$
 
 where 
 
-* $v_i(\sigma_i^2)=\sigma_i^2/$(number of sampled individuals in area $i$)
+* $n_i^+$ is the number of sampled individuals in area $i$
 
-* $d_i=$ (number of sampled cluster in area $i$) $-$ (number of strata area $i$ is contained in)
+* $d_i=$ (number of sampled clusters in area $i$) $-$ (number of strata area $i$ is contained in)
 
 * $\boldsymbol{X}_i$ and $\boldsymbol{Z}_i$ are covariate vectors
 
@@ -25,7 +25,7 @@ where
 
 First, we load the survey data, covariates, and spatial information.
 
-```{r setup, echo=T, message=FALSE, warning=FALSE, results='hide', cache=T}
+```{r setup, echo=T, message=FALSE, warning=FALSE, results='hide'}
 library(sf)
 library(spdep)
 library(haven)
@@ -110,14 +110,14 @@ admin2.dir.stable$mean <- ifelse(is.na(admin2.dir.stable$variance),NA,admin2.dir
 
 ```
 
-# Fit simple variance smoothing Fay-Herriot model
+# Fit CSS variance smoothing Fay-Herriot model
 
-Now we fit the simple variance smoothing Fay-Herriot model. We define a list of arguments and then compile and fit the model in stan. Note that in this example we only use covariates in the mean model, not the variance model. For both the latent mean and variance models we can use either BYM2 or IID random effects: we choose to use BYM2 for both here.
+Now we fit the CSS variance smoothing Fay-Herriot model. We define a list of arguments and then compile and fit the model in Stan. Note that in this example we only use covariates in the mean model, not the variance model. For both the latent mean and variance models we can use either BYM2 or IID random effects: we choose to use BYM2 for both here.
 
-```{r, simple variance smoothing model, cache=T, results='hide'}
-# specify parameters for the simple smoothing model
+```{r, CSS variance smoothing model, cache=T, results='hide'}
+# specify parameters for the CSS smoothing model
 data_areas <- which(!is.na(admin2.dir.stable$mean))
-simple_params <- haz_dat %>% filter(admin2 %in% data_areas) %>% 
+CSS_params <- haz_dat %>% filter(admin2 %in% data_areas) %>% 
   group_by(admin2) %>% 
   reframe(Cons = 1/n(),m = length(unique(cluster)), H = length(unique(v025))) %>% 
   mutate(df=pmax(1,m-H))
@@ -129,9 +129,9 @@ data_list = list(m=n_admin2, # number of areas
                  m_data=length(data_areas), # number of areas with data
                  data_areas = data_areas, # indices of areas with data
                  y=admin2.dir.stable$mean[data_areas], # direct mean estimates
-                 v_hat = admin2.dir.stable$variance[data_areas], # direct variance estimates
-                 df=simple_params$df, # degrees of freedom for variance
-                 Cons = simple_params$Cons, # constant, connecting sigma_i^2 and V_i
+                 v_hat_scaled = admin2.dir.stable$variance[data_areas]*CSS_params$df, # direct variance estimates
+                 df=CSS_params$df, # degrees of freedom for variance
+                 Cons = CSS_params$Cons, # constant, connecting sigma_i^2 and V_i
                  X = mean_model_matrix,# covariate matrix for mean
                  p_mean = ncol(mean_model_matrix), # number of mean covariates
                  Z = cbind(rep(1,n_admin2)), # covariate matrix variance
@@ -143,9 +143,9 @@ data_list = list(m=n_admin2, # number of areas
                  node_2 = nodes2$node2, # params for ICAR model
                  car_scale = Q2_scaled[1,1]/Q.admin2[1,1]) # params for ICAR model
 
-mod_simple <- cmdstan_model(stan_file = "Simple.stan")
+mod_CSS <- cmdstan_model(stan_file = "../Stan/CSS.stan")
 
-simple.fit <- mod_simple$sample(
+CSS.fit <- mod_CSS$sample(
   data = data_list,
   chains = 4,
   parallel_chains = 4,
@@ -157,8 +157,8 @@ simple.fit <- mod_simple$sample(
   refresh=00)
 
 # here we just report the area means, but you can select any model parameters to summarize
-theta_fit <- as.matrix(unclass(simple.fit$draws(variables = c("theta"), format = "matrix")))
-simple_res <- data.frame(area = 1:n_admin2,
+theta_fit <- as.matrix(unclass(CSS.fit$draws(variables = c("theta"), format = "matrix")))
+CSS_res <- data.frame(area = 1:n_admin2,
                        mean = apply(theta_fit,2,mean),
                        sd = apply(theta_fit,2,sd),
                        upper = apply(theta_fit,2,quantile,probs=0.95),
@@ -168,7 +168,7 @@ simple_res <- data.frame(area = 1:n_admin2,
 
 # Fit standard Fay-Herriot model
 
-Now we fit an analgous standard Fay-Herriot model, for comparison. The mean model is the same as in simple variance smoothing model.
+Now we fit an analgous standard Fay-Herriot model, for comparison. The mean model is the same as in CSS variance smoothing model.
 
 ```{r, standard FH model, cache=T}
 hyperpc.bym2 = list(prec = list(prior = "pc.prec", param = c(1, 0.01)),
@@ -231,30 +231,30 @@ clean_map_theme <- ggplot() + theme_bw() +
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank())
 
-lims <- range(std.res$mean,simple_res$mean)
+lims <- range(std.res$mean,CSS_res$mean)
 
 poly.adm2$std.mean <- std.res$mean
-poly.adm2$simple.mean <- simple_res$mean
+poly.adm2$CSS.mean <- CSS_res$mean
 
 m1 <- clean_map_theme + geom_sf(data = poly.adm2,aes(fill=std.mean)) +
   ggtitle('Standard') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
-m2 <- clean_map_theme + geom_sf(data = poly.adm2,aes(fill=simple.mean)) +
-  ggtitle('Simple') +
+m2 <- clean_map_theme + geom_sf(data = poly.adm2,aes(fill=CSS.mean)) +
+  ggtitle('CSS') +
   scale_fill_viridis_c(name = 'Mean',direction = -1,limits = lims)
 
 ggarrange(plotlist = list(m1,m2),common.legend = T,nrow=1)
 
 poly.adm2$std.ciwidth <- std.res$upper - std.res$lower
-poly.adm2$simple.ciwidth <- simple_res$upper - simple_res$lower
-lims <- range(poly.adm2$std.ciwidth,poly.adm2$simple.ciwidth)
+poly.adm2$CSS.ciwidth <- CSS_res$upper - CSS_res$lower
+lims <- range(poly.adm2$std.ciwidth,poly.adm2$CSS.ciwidth)
 
 v1 <- clean_map_theme + geom_sf(data = poly.adm2,aes(fill=std.ciwidth)) +
   ggtitle('Standard') +
   scale_fill_scico(name = 'Width of 90% credible intervals',
                    palette = 'lajolla',direction = -1,limits = lims)
-v2 <- clean_map_theme + geom_sf(data = poly.adm2,aes(fill=simple.ciwidth)) +
-  ggtitle('Simple') +
+v2 <- clean_map_theme + geom_sf(data = poly.adm2,aes(fill=CSS.ciwidth)) +
+  ggtitle('CSS') +
   scale_fill_scico(name = 'Width of 90% credible intervals',
                    palette = 'lajolla',direction = -1,limits = lims)
 
@@ -263,15 +263,15 @@ ggarrange(plotlist = list(v1,v2),common.legend = T,nrow=1)
 
 par(mfrow=c(1,2))
 
-lims <- range(std.res$mean,simple_res$mean)
-plot(std.res$mean,simple_res$mean,
-     main='Mean',xlab = 'Standard',ylab = 'Simple variance smoothing',
+lims <- range(std.res$mean,CSS_res$mean)
+plot(std.res$mean,CSS_res$mean,
+     main='Mean',xlab = 'Standard',ylab = 'CSS variance smoothing',
      xlim=lims,ylim=lims)
 abline(0,1)
 
-lims <- range(std.res$sd,simple_res$sd)
-plot(std.res$sd,simple_res$sd, 
-     main='Standard deviation',xlab = 'Standard',ylab = 'Simple variance smoothing',
+lims <- range(std.res$sd,CSS_res$sd)
+plot(std.res$sd,CSS_res$sd, 
+     main='Standard deviation',xlab = 'Standard',ylab = 'CSS variance smoothing',
      xlim=lims,ylim=lims)
 abline(0,1)
 
@@ -280,7 +280,7 @@ abline(0,1)
 # Troubleshooting
 
 - check that the data does not include any NAs
-- for the stan parameters, make sure the first columns of X and Z are 1s
-- make sure all stan parameters don't contain NAs and are of correct dimension, using the vignette as a guide
+- for the Stan parameters, make sure the first columns of X and Z are 1s
+- make sure all Stan parameters don't contain NAs and are of correct dimension, using the vignette as a guide
 
 

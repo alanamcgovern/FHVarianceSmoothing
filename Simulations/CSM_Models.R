@@ -11,8 +11,8 @@ args <- commandArgs(trailingOnly=TRUE)
 setting <- as.numeric(args[1])
 k <- as.numeric(args[2])
 
-mod <- cmdstan_model(stan_file = "SASW.stan")
-#mod <- cmdstan_model(stan_file = "Stan/SASW.stan")
+mod <- cmdstan_model(stan_file = "CSM.stan")
+#mod <- cmdstan_model(stan_file = "Stan/CSM.stan")
 
 setwd(paste0('Sim',setting))
 
@@ -151,14 +151,16 @@ v_fit1 <- (as.matrix(unclass(fit1$draws(variables = c("v_data"), format = "matri
 write.csv(data.frame(sim=k,
                      area = data_areas,
                      model = 'Mod2',
-                     mean = apply(v_fit1,2,mean)),file=paste0('Mod2/Hyper/Var_Result',k,'.csv'))
+                     mean = apply(v_fit1,2,mean),
+                     median = apply(v_fit1,2,median)),file=paste0('Mod2/Hyper/Var_Result',k,'.csv'))
 
 hyper_fit1 <- as.matrix(unclass(fit1$draws(variables = c("log_sig2","beta",'gamma','sig_u','phi1','phi2','Q'), format = "matrix")))
 
 write.csv(data.frame(sim=k,
                      model = 'Mod2',
                      param = colnames(hyper_fit1),
-                     mean = colMeans(hyper_fit1)),
+                     mean = colMeans(hyper_fit1),
+                     median = apply(hyper_fit1,2,median)),
           file=paste0('Mod2/Hyper/Hyper_Result',k,'.csv'))
 
 df_fit1 <- as.matrix(unclass(fit1$draws(variables = c('df'), format = "matrix")))
@@ -226,7 +228,7 @@ write.csv(data.frame(sim=k,
                      area = data_areas,
                      model = 'Mod2a',
                      mean = apply(v_fit2,2,mean),
-                     bias.factor = colMeans(Q_fit2[,1:length(data_areas)])/ omegaSomega[data_areas]),
+                     median = apply(v_fit2,2,median)),
           file=paste0('Mod2a/Hyper/Var_Result',k,'.csv'))
 
 hyper_fit2 <- as.matrix(unclass(fit2$draws(variables = c("log_sig2","beta",'gamma','sig_u','phi1','phi2','Q'), format = "matrix")))
@@ -234,7 +236,8 @@ hyper_fit2 <- as.matrix(unclass(fit2$draws(variables = c("log_sig2","beta",'gamm
 write.csv(data.frame(sim=k,
                      model = 'Mod2a',
                      param = colnames(hyper_fit2),
-                     mean = colMeans(hyper_fit2)),
+                     mean = colMeans(hyper_fit2),
+                     median = apply(hyper_fit2,2,median)),
           file=paste0('Mod2a/Hyper/Hyper_Result',k,'.csv'))
 
 df_fit2 <- as.matrix(unclass(fit2$draws(variables = c('df'), format = "matrix")))
